@@ -268,3 +268,34 @@ def save_script(script, video, output_dir):
 
     filepath.write_text(md, encoding="utf-8")
     return str(filepath)
+
+def save_script_file(script, video, output_dir):
+    """Alias for save_script - keeps sorcerer.py import working."""
+    return save_script(script, video, output_dir)
+
+
+def format_script_terminal(script):
+    """Return a terminal-friendly summary of the generated script."""
+    if not script or script.get("_error"):
+        err = (script or {}).get("_error", "unknown")
+        return "  [Script error: " + str(err) + "]"
+    out = []
+    out.append("")
+    out.append("  " + "=" * 60)
+    out.append("  SCRIPT: " + script.get("title", "Untitled")[:54])
+    out.append("  " + "=" * 60)
+    funny = script.get("funniest_line", "")
+    if funny:
+        out.append("  Best line: " + funny[:54])
+        out.append("  " + "-" * 60)
+    for s in script.get("sections", []):
+        ts = s.get("timestamp", "")
+        name = s.get("name", "")
+        out.append("  [" + ts + "] " + name)
+    out.append("  " + "-" * 60)
+    runtime = str(script.get("estimated_runtime_mins", "?"))
+    tags = ", ".join(script.get("seo_tags", [])[:4])
+    out.append("  ~" + runtime + " mins | " + tags[:40])
+    out.append("  " + "=" * 60)
+    out.append("")
+    return "\n".join(out)

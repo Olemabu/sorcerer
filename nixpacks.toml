@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["ffmpeg", "python311"]
+nixPkgs = ["ffmpeg", "python311Full"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["python3.11 -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt"]
 
 [start]
-cmd = "python sorcerer.py daemon"
+cmd = "python3.11 sorcerer.py daemon"
