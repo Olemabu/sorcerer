@@ -190,6 +190,20 @@ def run_scan(db, quiet=False):
     db["last_scan"]   = datetime.now().isoformat()
     save_db(db)
 
+    # Google Trends scan
+    try:
+        from trends import scan_trends
+        scan_trends(
+            db               = db,
+            telegram_token   = TG_TOKEN,
+            telegram_chat_id = TG_CHAT,
+            seen_alerts      = db["seen_alerts"],
+            log_fn           = log,
+        )
+        save_db(db)
+    except Exception as e:
+        log(f"Google Trends scan error: {e}")
+
     if not quiet:
         print(f"\n  {'─' * 50}")
         if new_alerts:
