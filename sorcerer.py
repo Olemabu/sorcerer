@@ -406,27 +406,76 @@ def cmd_script(args):
 def cmd_daemon(args):
     """
     Runs forever. Scans every SCAN_INTERVAL_HOURS hours.
-    Set SCAN_INTERVAL_HOURS in .env to change (default: 2).
-    Kill with Ctrl+C.
+    Telegram bot runs in background for remote control.
     """
     interval_secs = SCAN_INTERVAL_HOURS * 3600
 
     print(f"""
   ╔══════════════════════════════════════════╗
-  ║  SORCERER DAEMON — RUNNING                 ║
-  ║  Scan interval : every {SCAN_INTERVAL_HOURS}h{' ' * 19}║
+  ║  SORCERER DAEMON — RUNNING               ║
+  ║  Scan interval : every {SCAN_INTERVAL_HOURS}h                   ║
   ║  Channels      : {len(load_db().get('channels', {})):<24}║
   ║  Intelligence  : {'ON ✓' if ANTHROPIC_KEY else 'OFF':<24}║
   ║  Telegram      : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
-  ║  Stop with     : Ctrl+C{' ' * 19}║
+  ║  Bot control   : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
   ╚══════════════════════════════════════════╝
     """)
 
-    while True:
-        db         = load_db()
-        n_alerts   = run_scan(db)
-        next_scan  = datetime.now().strftime("%H:%M")
+    # ── Start Telegram bot in background ──────────────────────────────────────
+    bot = None
+    if TG_TOKEN and TG_CHAT:
+        from bot import SorcererBot
 
+        bot = SorcererBot(
+            token    = TG_TOKEN,
+            chat_id  = TG_CHAT,
+            db_file  = str(DB_FILE),
+            log_fn   = log,
+        )
+
+        # Give bot access to scan function
+        def bot_scan():
+            db = load_db()
+            return run_scan(db)
+
+        # Give bot access to add channel function
+        def bot_add(query):
+            if not YT_KEY:
+                return "❌ No YouTube API key configured."
+            from engine import resolve_channel
+            cid, title, subs = resolve_channel(query, YT_KEY)
+            if not cid:
+                return f"❌ Could not find channel: {query}"
+            db = load_db()
+            if cid in db.get("channels", {}):
+                return f"✅ Already watching: <b>{title}</b>"
+            db.setdefault("channels", {})[cid] = {
+                "id": cid, "title": title, "subscribers": subs,
+                "added": datetime.now().isoformat(),
+                "baseline": None, "last_checked": None, "alert_count": 0,
+            }
+            save_db(db)
+            return f"✅ Added <b>{title}</b> ({subs:,} subs) to radar.\nFirst scan within 2 hours."
+
+        bot.scan_fn = bot_scan
+        bot.add_fn  = bot_add
+
+        # Send startup message
+        bot.send(
+            "🧙 <b>SORCERER is online</b>\n\n"
+            f"Watching {len(load_db().get('channels', {}))} channel(s)\n"
+            f"Scanning every {SCAN_INTERVAL_HOURS} hours\n\n"
+            "Send /help to see all commands.\n"
+            "Send /add @channel to start watching someone."
+        )
+
+        bot.start_in_background()
+        log("  📱 Telegram bot started — send /help to your bot")
+
+    # ── Main scan loop ─────────────────────────────────────────────────────────
+    while True:
+        db = load_db()
+        run_scan(db)
         log(f"Next scan in {SCAN_INTERVAL_HOURS}h — sleeping...")
         time.sleep(interval_secs)
 
