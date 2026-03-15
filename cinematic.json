@@ -1,0 +1,76 @@
+{
+  "name": "cinematic",
+  "description": "Dark, dramatic, documentary. Film grain. Slow burns. Sudden cuts. Looks like it cost $500K to make.",
+
+  "color": {
+    "background": "#000000",
+    "title_primary": "#FFFFFF",
+    "title_accent": "#FF3355",
+    "subtitle": "#AAAAAA",
+    "lower_third_bg": "rgba(0,0,0,0.75)",
+    "lower_third_line": "#FF3355",
+    "overlay_tint": "rgba(0,0,0,0.35)",
+    "grade_shadows": "#0a0a14",
+    "grade_highlights": "#fff8f0"
+  },
+
+  "typography": {
+    "title_font": "Bebas Neue",
+    "title_size": 72,
+    "title_weight": 400,
+    "title_letter_spacing": "0.08em",
+    "subtitle_font": "DM Mono",
+    "subtitle_size": 18,
+    "body_font": "Instrument Sans",
+    "lower_third_font": "DM Mono",
+    "lower_third_size": 14,
+    "lower_third_letter_spacing": "0.12em"
+  },
+
+  "timing": {
+    "title_card_duration_secs": 2.5,
+    "title_fade_in_frames": 18,
+    "title_fade_out_frames": 12,
+    "broll_min_cut_secs": 3.0,
+    "broll_max_cut_secs": 6.0,
+    "lower_third_duration_secs": 3.5,
+    "stat_counter_duration_secs": 2.0,
+    "transition_frames": 8,
+    "hook_silence_before_secs": 1.2
+  },
+
+  "effects": {
+    "film_grain": true,
+    "film_grain_intensity": 0.18,
+    "vignette": true,
+    "vignette_intensity": 0.4,
+    "color_grade": "teal_orange",
+    "letterbox": true,
+    "letterbox_ratio": "2.39:1",
+    "slow_zoom_broll": true,
+    "slow_zoom_scale": 1.06,
+    "flash_cut_on_stat": true
+  },
+
+  "music": {
+    "mood": "cinematic tension with dark humor undertones",
+    "tempo": "slow build, 70-85 BPM",
+    "style": "orchestral minimal, Hans Zimmer adjacent, occasional ironic contrast",
+    "duck_under_narration": true,
+    "duck_level_db": -18,
+    "full_level_db": -8,
+    "fade_in_secs": 2.0,
+    "fade_out_secs": 3.0
+  },
+
+  "section_treatments": {
+    "hook":        "black_title_card",
+    "stat":        "flash_counter_broll",
+    "quote":       "lower_third_broll",
+    "tension":     "fast_cut_montage",
+    "explanation": "slow_broll_narration",
+    "prediction":  "slow_zoom_title",
+    "humor":       "smash_cut_contrast",
+    "cta":         "clean_end_card"
+  }
+}
