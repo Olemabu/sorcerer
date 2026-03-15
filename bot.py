@@ -84,6 +84,9 @@ class SorcererBot:
     def handle_help(self, chat_id):
         self.send(
             "🧙 <b>SORCERER Commands</b>\n\n"
+            "<b>Quick Setup (recommended)</b>\n"
+            "/setup — Load preset channels for your niche\n"
+            "/full — Load ALL channels (AI + Healthcare + Innovation)\n\n"
             "<b>YouTube Radar</b>\n"
             "/add @channel — Add a channel to watch\n"
             "/remove name — Stop watching a channel\n"
@@ -94,12 +97,7 @@ class SorcererBot:
             "/trends — See all trend keywords\n\n"
             "<b>Info</b>\n"
             "/status — How SORCERER is doing\n"
-            "/help — Show this message\n\n"
-            "<b>Examples:</b>\n"
-            "/add @mkbhd\n"
-            "/add Veritasium\n"
-            "/watch autonomous AI\n"
-            "/watch AI replace jobs",
+            "/help — Show this message",
             chat_id
         )
 
@@ -211,6 +209,90 @@ class SorcererBot:
         except Exception as e:
             self.send(f"⚠ Error: {e}", chat_id)
 
+    def handle_setup(self, chat_id, args):
+        """Load preset channels and keywords for a niche."""
+        from presets import NICHES, list_niches
+
+        if not args:
+            niche_list = []
+            for key, n in NICHES.items():
+                niche_list.append(
+                    f"/{key} — {n['name']}\n"
+                    f"  {len(n['channels'])} channels · {len(n['trend_keywords'])} keywords · CPM {n['cpm_range']}"
+                )
+            self.send(
+                "🧙 <b>SORCERER Niche Setup</b>\n\n"
+                "Choose your niche and I will automatically load all the best "
+                "channels and keywords for you.\n\n"
+                + "\n\n".join(niche_list) +
+                "\n\nSend the command to load that niche.\n"
+                "Example: /full",
+                chat_id
+            )
+            return
+
+        niche_key = args[0].lower().lstrip("/")
+        niche = NICHES.get(niche_key)
+
+        if not niche:
+            self.send(
+                f"❌ Unknown niche: {niche_key}\n\n"
+                "Send /setup to see available niches.",
+                chat_id
+            )
+            return
+
+        self.send(
+            f"🧙 Loading <b>{niche['name']}</b> preset...\n\n"
+            f"Adding {len(niche['channels'])} channels and "
+            f"{len(niche['trend_keywords'])} trend keywords.\n\n"
+            f"This will take a minute...",
+            chat_id
+        )
+
+        # Add channels
+        added_channels = []
+        failed_channels = []
+        for channel in niche["channels"]:
+            if self.add_fn:
+                result = self.add_fn(channel)
+                if "✅" in result:
+                    name = result.split("<b>")[1].split("</b>")[0] if "<b>" in result else channel
+                    added_channels.append(name)
+                else:
+                    failed_channels.append(channel)
+            import time
+            time.sleep(0.5)
+
+        # Add trend keywords
+        try:
+            from trends import add_manual_keywords
+            add_manual_keywords(self.db_file, niche["trend_keywords"])
+        except Exception as e:
+            self.log_fn(f"  ⚠ Could not add trend keywords: {e}")
+
+        # Summary
+        summary = (
+            f"✅ <b>{niche['name']} loaded!</b>\n\n"
+            f"📡 Channels added: {len(added_channels)}\n"
+            f"📈 Trend keywords added: {len(niche['trend_keywords'])}\n\n"
+        )
+
+        if added_channels:
+            summary += "<b>Watching:</b>\n"
+            for ch in added_channels[:10]:
+                summary += f"  • {ch}\n"
+            if len(added_channels) > 10:
+                summary += f"  ... and {len(added_channels) - 10} more\n"
+
+        summary += (
+            f"\n💰 Expected CPM: {niche['cpm_range']}\n\n"
+            f"Next scan in up to 2 hours.\n"
+            f"Use /scan to run one right now."
+        )
+
+        self.send(summary, chat_id)
+
     def handle_status(self, chat_id):
         db    = self.load_db()
         last  = db.get("last_scan")
@@ -248,15 +330,20 @@ class SorcererBot:
         command = parts[0].lower().split("@")[0]
         args    = parts[1:]
         handlers = {
-            "/start":  lambda: self.handle_start(chat_id),
-            "/help":   lambda: self.handle_help(chat_id),
-            "/list":   lambda: self.handle_list(chat_id),
-            "/add":    lambda: self.handle_add(chat_id, args),
-            "/remove": lambda: self.handle_remove(chat_id, args),
-            "/scan":   lambda: self.handle_scan(chat_id),
-            "/watch":  lambda: self.handle_watch(chat_id, args),
-            "/trends": lambda: self.handle_trends(chat_id),
-            "/status": lambda: self.handle_status(chat_id),
+            "/start":       lambda: self.handle_start(chat_id),
+            "/help":        lambda: self.handle_help(chat_id),
+            "/list":        lambda: self.handle_list(chat_id),
+            "/add":         lambda: self.handle_add(chat_id, args),
+            "/remove":      lambda: self.handle_remove(chat_id, args),
+            "/scan":        lambda: self.handle_scan(chat_id),
+            "/watch":       lambda: self.handle_watch(chat_id, args),
+            "/trends":      lambda: self.handle_trends(chat_id),
+            "/status":      lambda: self.handle_status(chat_id),
+            "/setup":       lambda: self.handle_setup(chat_id, args),
+            "/ai_tech":     lambda: self.handle_setup(chat_id, ["ai_tech"]),
+            "/ai_healthcare": lambda: self.handle_setup(chat_id, ["ai_healthcare"]),
+            "/ai_innovation": lambda: self.handle_setup(chat_id, ["ai_innovation"]),
+            "/full":        lambda: self.handle_setup(chat_id, ["full"]),
         }
         handler = handlers.get(command)
         if handler:
