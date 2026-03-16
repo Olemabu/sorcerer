@@ -96,7 +96,8 @@ class SorcererBot:
             "/watch keyword — Monitor a topic on Google Trends\n"
             "/trends — See all trend keywords\n\n"
             "<b>Info</b>\n"
-            "/status — How SORCERER is doing\n\n"
+            "/status — How SORCERER is doing\n"
+            "/usage — Token usage and cost report\n\n"
             "<b>AI Director</b>\n"
             "/direct — Direct your last script\n"
             "/scorsese /mrbeast /capcut /hybrid\n\n"
@@ -475,6 +476,13 @@ class SorcererBot:
             import time
             time.sleep(0.5)
 
+    def handle_usage(self, chat_id, args):
+        """Show token usage and cost report."""
+        import os
+        from usage_tracker import UsageTracker
+        tracker = UsageTracker(self.db_file)
+        self.send(tracker.full_report_telegram(), chat_id)
+
     def handle_status(self, chat_id):
         db    = self.load_db()
         last  = db.get("last_scan")
@@ -532,6 +540,8 @@ class SorcererBot:
             "/capcut":         lambda: self.handle_direct(chat_id, ["capcut"]),
             "/hybrid":         lambda: self.handle_direct(chat_id, ["hybrid"]),
             "/approve":        lambda: self.handle_approve(chat_id, args),
+            "/usage":          lambda: self.handle_usage(chat_id, args),
+            "/cost":           lambda: self.handle_usage(chat_id, args),
             "/revise":         lambda: self.handle_revise(chat_id, args),
             "/restyle":        lambda: self.handle_restyle(chat_id, args),
             "/discard":        lambda: self.handle_discard(chat_id, args),

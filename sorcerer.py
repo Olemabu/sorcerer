@@ -99,6 +99,11 @@ def run_scan(db, quiet=False):
         print("No channels added. Use: sorcerer add <channel>")
         return 0
 
+    # Initialise usage tracker for this scan
+    from usage_tracker import UsageTracker
+    tracker = UsageTracker(str(DB_FILE))
+    tracker.reset_session()
+
     if not quiet:
         intel_status = "ON ✓" if ANTHROPIC_KEY else "OFF (add ANTHROPIC_API_KEY to enable)"
         log(f"SCAN START — {len(channels)} channels — intelligence {intel_status}")
@@ -163,6 +168,27 @@ def run_scan(db, quiet=False):
                     else:
                         log("  ⚠  Script generation failed")
 
+                # Run AI Director on the script
+                direction = None
+                if script and not script.get("_error") and ANTHROPIC_KEY:
+                    log("  🎬  AI Director is reviewing the script...")
+                    from director import direct, format_direction_terminal, format_direction_telegram
+                    direction = direct(
+                        script        = script,
+                        style         = "hybrid",
+                        target_culture = "global",
+                        anthropic_key  = ANTHROPIC_KEY,
+                        log_fn         = log,
+                    )
+                    if direction and not direction.get("_error"):
+                        log_plain(format_direction_terminal(direction))
+                        # Send director vision to Telegram
+                        from alerts import send_telegram
+                        dir_msg = format_direction_telegram(direction)
+                        if dir_msg:
+                            send_telegram(dir_msg, TG_TOKEN, TG_CHAT)
+                            log("  → Director vision sent to Telegram ✓")
+
                 # Deliver signal + production package to Telegram
                 deliver(
                     video, signal, baseline, intel,
@@ -215,6 +241,18 @@ def run_scan(db, quiet=False):
                 print(f"  {s['emoji']}  {s['level']} — {v['channel_title']}: {v['title'][:50]}")
         else:
             log("SCAN DONE — all quiet")
+
+
+    # Send usage summary to Telegram after every scan
+    try:
+        from usage_tracker import UsageTracker
+        tracker = UsageTracker(str(DB_FILE))
+        usage_summary = tracker.session_summary()
+        if usage_summary and TG_TOKEN and TG_CHAT:
+            from alerts import send_telegram
+            send_telegram(usage_summary, TG_TOKEN, TG_CHAT)
+    except Exception:
+        pass
 
     return len(new_alerts)
 
