@@ -1,22 +1,54 @@
 """
-SORCERER — Script Writer (Documentary Edition)
-================================================
-Writes scripts that are:
-  - Gripping: open loops, tension, stakes established in 10 seconds
-  - Entertaining: unexpected analogies, rhythm, momentum
-  - FUNNY: dark humor, absurdist comparisons, self-aware wit
-    The kind of funny that makes people rewatch a line and
-    quote it in comments. Not cringe. Not try-hard.
-    The Kurzgesagt meets John Oliver meets actual documentary.
+SORCERER — Script Writer (Full Production Edition)
+====================================================
+Writes complete production-ready packages:
+  - MrBeast energy + documentary style
+  - Banned words filter (YouTube safe, monetisation safe)
+  - Conversion-optimised everything
+  - Full content plan not just script suggestions
 
-Claude Opus only. Script quality is the product.
+Claude Opus only. This is the product.
 """
 
 import json
+import re
 import requests
+from datetime import datetime
+from pathlib import Path
 
 CLAUDE_MODEL  = "claude-opus-4-5"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+
+# ── YouTube banned/demonetised words to avoid ─────────────────────────────────
+BANNED_WORDS = [
+    "kill", "killed", "killing", "murder", "suicide", "bomb", "terrorist",
+    "shooting", "massacre", "genocide", "rape", "porn", "sex", "naked",
+    "drug", "cocaine", "heroin", "meth", "overdose", "shoot up",
+    "dead body", "corpse", "blood", "gore", "weapon", "gun", "rifle",
+    "explosive", "detonate", "virus spread", "pandemic death",
+    "crisis", "tragedy", "catastrophe", "disaster"
+]
+
+# Safe replacements
+SAFE_REPLACEMENTS = {
+    "kill":       "eliminate",
+    "killed":     "replaced",
+    "killing":    "disrupting",
+    "dead":       "obsolete",
+    "crisis":     "turning point",
+    "tragedy":    "challenge",
+    "disaster":   "disruption",
+    "catastrophe": "transformation",
+    "virus":      "technology",
+    "bomb":       "breakthrough",
+}
+
+
+def sanitise_script(text):
+    """Replace banned words with safe alternatives."""
+    for word, replacement in SAFE_REPLACEMENTS.items():
+        text = re.sub(rf'\b{word}\b', replacement, text, flags=re.IGNORECASE)
+    return text
 
 
 def generate_script(video, signal, baseline, comments, intel, anthropic_key):
@@ -28,137 +60,165 @@ def generate_script(video, signal, baseline, comments, intel, anthropic_key):
         for c in (comments or [])[:60]
     ) or "No comments available."
 
-    angle         = intel.get("my_video_angle", video["title"]) if intel else video["title"]
-    hook          = intel.get("hook_idea", "") if intel else ""
-    structure     = intel.get("content_structure", []) if intel else []
-    audience      = intel.get("target_audience", []) if intel else []
-    pulse         = intel.get("comment_pulse", "") if intel else ""
-    why           = intel.get("why_spiking", "") if intel else ""
-    length_mins   = intel.get("recommended_length_mins", 15) if intel else 15
+    angle       = intel.get("my_video_angle", video["title"]) if intel else video["title"]
+    hook        = intel.get("hook_idea", "") if intel else ""
+    structure   = intel.get("content_structure", []) if intel else []
+    audience    = intel.get("target_audience", []) if intel else []
+    pulse       = intel.get("comment_pulse", "") if intel else ""
+    why         = intel.get("why_spiking", "") if intel else ""
+    length_mins = intel.get("recommended_length_mins", 15) if intel else 15
+    struct_block = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(structure))
+    audience_str = ", ".join(audience)
 
-    struct_block  = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(structure))
-    audience_str  = ", ".join(audience)
+    prompt = f"""You are the head writer for the most watched AI and healthcare documentary channel on YouTube.
 
-    prompt = f"""You are the writer behind the most entertaining, funny, and genuinely gripping documentary channel on YouTube.
+Your channel sits at the intersection of:
+- Breaking AI and tech news
+- Healthcare and medical breakthroughs  
+- Innovation, money, and unintended consequences
 
-Your style:
-- Kurzgesagt's visual storytelling instincts
-- John Oliver's comedic timing and absurdist analogies
-- MKBHD's authority and directness
-- The Economist's wit without the stuffiness
-- A stand-up comedian who happens to know everything about tech and business
+Your writing style combines:
+- MrBeast's ENERGY and pacing — fast, urgent, every 90 seconds something surprising
+- Kurzgesagt's visual storytelling — complex ideas made viscerally simple
+- John Oliver's dark humor — state the absurd thing deadpan, let the audience feel it
+- Vice documentary's gritty authenticity — real stakes, real people, real consequences
+- The Economist's authority — every claim backed by data, names, numbers
 
-You write narration scripts — no host on camera, just voice over documentary footage.
-The script must be READ ALOUD. Write for the ear, not the eye.
-Short sentences when building tension. Longer ones when explaining.
-Rhythm matters. Pacing matters. The occasional one-liner that makes someone choke on their coffee matters.
+CRITICAL — MRBEAST ENERGY RULES:
+1. The first 10 seconds must make it IMPOSSIBLE to click away
+2. Every 90 seconds — a new revelation, a shocking stat, a tonal shift
+3. Stakes must feel PERSONAL to the viewer within 30 seconds
+4. Open loops everywhere — always teasing what's coming next
+5. The pace never drops. Ever. If a section drags, cut it.
+6. End every act with something that makes stopping feel like a mistake
 
-WHAT'S GOING VIRAL RIGHT NOW:
+CRITICAL — MONETISATION SAFE:
+Never use these words or concepts: {', '.join(BANNED_WORDS[:20])}
+Use dramatic but advertiser-safe language throughout.
+Frame all sensitive topics around innovation, disruption, transformation.
+Healthcare topics: focus on breakthroughs, not suffering.
+
+CRITICAL — CONVERSION OPTIMISED:
+- Title must score 9/10 on curiosity gap (makes you NEED to know)
+- Thumbnail must work in 0.3 seconds on mobile
+- Hook must pass the "3 second test" — would you keep watching?
+- CTA must get subscribe + comment + next video simultaneously
+- Every section must earn its place — no filler, no padding
+
+THE FULL CONTENT PLAN (not just a script — a complete production package):
+
+VIRAL SIGNAL CONTEXT:
 Title         : {video['title']}
 Channel       : {video['channel_title']}
 Signal        : {signal.get('level','VIRAL')} — {signal.get('multiplier',5)}× above baseline
-Age           : {video['age_hours']}h old · {video['views']:,} views
-Target length : {length_mins} minutes of narration
+Views         : {video['views']:,} in {video['age_hours']}h
 Our angle     : {angle}
 Audience      : {audience_str}
+Target length : {length_mins} minutes
 
-WHY PEOPLE ARE LOSING THEIR MINDS OVER THIS:
+WHY IT'S EXPLODING:
 {why}
 
-WHAT THE COMMENTS ARE ACTUALLY SAYING:
+AUDIENCE EMOTION RIGHT NOW:
 {pulse}
 
-TOP COMMENTS (mine these for the exact language and fears of the audience):
+REAL COMMENTS (use their exact language and fears):
 {comment_block}
 
-STRATEGIC STRUCTURE:
+STRUCTURE TO FOLLOW:
 {struct_block}
 
-HOOK DIRECTION:
-{hook}
-
-━━ WRITING RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-HUMOR RULES (mandatory — this is what separates us):
-1. Funny through SPECIFICITY, not jokes. "A startup in San Francisco replaced their entire HR department with a $40/month AI" is funnier than any joke.
-2. Absurdist comparisons that are also accurate. If AI is taking jobs, compare it to something historically parallel but ridiculous.
-3. Dry delivery. State the insane thing completely deadpan. Let the audience do the work.
-4. ONE genuine laugh-out-loud moment per section. Not a punchline. A perfect observation.
-5. Dark humor is fine. Gallows humor about tech disruption is our brand. 
-6. Never explain the joke. Never say "which is ironic" or "if you can believe it."
-7. The funniest line in any section should be the LAST line before the next section starts.
-
-GRIP RULES (mandatory):
-1. Open with something that sounds wrong. Make them need to know why it's right.
-2. Every section ends with a question or statement that makes stopping feel impossible.
-3. Plant a "wait for it" in the first 60 seconds that pays off at minute 10+.
-4. State the stakes early. Make it personal. "This affects you" not "this affects society."
-5. Pattern interrupt every 90 seconds — sudden tonal shift, shocking stat, unexpected silence cue.
-
-DOCUMENTARY NARRATION RULES:
-1. Write [VISUAL CUE: description] markers so the editor knows what to cut to.
-2. [MUSIC: instruction] markers at key emotional shifts.
-3. [PAUSE] for dramatic effect — the silence is part of the script.
-4. [TITLE CARD: text] for on-screen text moments.
-5. Narration reads at roughly 150 words per minute. A 15-minute video = ~2,250 words of narration.
-
-━━ OUTPUT FORMAT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━ RETURN A COMPLETE PRODUCTION PACKAGE ━━━━━━━━━━━━━━━━
 
 Return ONLY valid JSON. No markdown. No text outside the JSON.
 
 {{
-  "title": "Final video title. Punchy. Specific. Slightly threatening.",
+  "title": "Final title. Must create massive curiosity gap. Under 70 chars. Specific number or shocking claim if possible.",
 
-  "thumbnail_direction": "Exact description. What image. What text overlay. What expression if face shown. What color. Be specific enough that a designer can execute without asking questions.",
+  "title_alternatives": [
+    "Alternative title 1 — more fear-based",
+    "Alternative title 2 — more hope-based", 
+    "Alternative title 3 — more money-based"
+  ],
+
+  "thumbnail": {{
+    "background": "Exact color and style",
+    "main_image": "What to show — be specific",
+    "text_overlay": "Max 4 words. Huge. Shocking.",
+    "face_expression": "Exact expression if face shown",
+    "color_scheme": "Exact colors",
+    "mobile_test": "Will this work as a tiny square on a phone? Yes/No and why",
+    "gemini_prompt": "A hyper-detailed image generation prompt for Google Gemini. Include: exact composition, lighting, mood, colors, text placement, style references, aspect ratio 16:9, photorealistic or illustrated style. Must be specific enough that Gemini produces a broadcast-quality YouTube thumbnail on first attempt. Example format: Photorealistic YouTube thumbnail, 16:9 aspect ratio. [describe exactly what is shown]. Dramatic cinematic lighting with [specific colors]. Bold text overlay reading [EXACT TEXT] in [font style] positioned [location]. Background shows [specific scene]. Overall mood: [mood]. Style similar to [reference]. High contrast, eye-catching, works at small size on mobile."
+  }},
 
   "seo_tags": ["tag1","tag2","tag3","tag4","tag5","tag6","tag7","tag8","tag9","tag10"],
 
+  "description_hook": "First 2 lines of YouTube description — must hook before Show More button",
+
   "estimated_runtime_mins": {length_mins},
 
-  "funniest_line": "The single best line in the whole script. The one that will end up in comments.",
+  "funniest_line": "The single best line in the whole script. The one that ends up in comments.",
+
+  "hook_score": "Rate the hook 1-10 on the 3-second test and explain why",
 
   "sections": [
     {{
       "name": "HOOK",
       "timestamp": "0:00",
-      "duration_secs": 50,
+      "duration_secs": 45,
+      "mrbeast_energy": "What keeps this from being skippable in this section",
       "visual_treatment": "black_title_card",
-      "pain_addressed": "The specific fear or curiosity this activates",
-      "narration": "The full word-for-word narration. Natural spoken language. No corporate speak. Include [VISUAL CUE: ...], [MUSIC: ...], [PAUSE], [TITLE CARD: ...] markers throughout. The funny line if this section has one.",
-      "funny_moment": "The specific funny line or observation in this section, or null",
-      "open_loop": "What question or tension this section creates that the next section must resolve",
-      "broll_keywords": ["keyword1", "keyword2", "keyword3"]
+      "pain_addressed": "The exact fear or desire activated here",
+      "narration": "Full word-for-word narration. Natural spoken language. Monetisation safe. Include [VISUAL CUE: ...], [MUSIC: ...], [PAUSE], [TITLE CARD: ...] markers. MrBeast energy throughout.",
+      "funny_moment": "The specific funny line or observation, or null",
+      "open_loop": "What tension this creates that forces them to keep watching",
+      "broll_keywords": ["keyword1", "keyword2", "keyword3"],
+      "conversion_note": "What makes this section drive watch time specifically"
+    }}
+  ],
+
+  "fear_hope_money_map": [
+    {{
+      "fear": "Specific fear from the comments",
+      "hope": "The counter-narrative that gives them relief",
+      "money": "The financial opportunity or implication",
+      "problem_created": "The new problem this technology creates",
+      "problem_solved": "The existing problem this technology solves"
     }}
   ],
 
   "comment_bait": [
     {{
-      "timestamp": "approximate timestamp",
-      "narration_line": "The exact line that will trigger mass comments",
-      "why": "The psychological mechanic — why this line forces a response"
+      "timestamp": "timestamp",
+      "narration_line": "Exact line that will flood the comments",
+      "why": "Psychological mechanism — why this forces a response",
+      "expected_comment_type": "What people will actually write"
     }}
   ],
 
-  "cta_narration": "The full CTA narration. 30-45 seconds. Gets subscribe + comment + next video. Sounds human, not like a YouTube tutorial. Can be slightly self-deprecating or funny.",
+  "cta_narration": "Full CTA. 30-45 seconds. Gets subscribe + comment + next video. Funny if possible. Never salesy.",
 
-  "pain_profit_map": [
-    {{
-      "pain": "Specific audience fear from the comments",
-      "insight": "The reframe the video delivers",
-      "profit": "What they leave with"
-    }}
+  "ad_placement_suggestions": [
+    "Where to place mid-roll ads without killing watch time"
   ],
 
-  "production_notes": [
-    "Specific note for this video's production",
-    "Another specific note",
-    "Another"
+  "sponsorship_angles": [
+    "Natural sponsorship integration points for health tech or AI tool brands"
   ],
 
   "chapter_markers": [
-    {{"time": "0:00", "title": "Chapter name"}},
-    {{"time": "2:30", "title": "Chapter name"}}
-  ]
+    {{"time": "0:00", "title": "Chapter name"}}
+  ],
+
+  "production_notes": [
+    "Specific production tip for this video"
+  ],
+
+  "banned_words_check": "Confirm: does this script avoid all demonetisation triggers? Yes/No and any flagged phrases",
+
+  "estimated_cpm": "Expected CPM range for this video based on topic and audience",
+
+  "viral_prediction": "Honest assessment — will this video perform? Why?"
 }}"""
 
     try:
@@ -171,7 +231,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
             },
             json={
                 "model":      CLAUDE_MODEL,
-                "max_tokens": 9000,
+                "max_tokens": 10000,
                 "messages":   [{"role": "user", "content": prompt}],
             },
             timeout=120,
@@ -179,7 +239,16 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
         r.raise_for_status()
         raw = r.json()["content"][0]["text"].strip()
         raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-        return json.loads(raw)
+        result = json.loads(raw)
+
+        # Sanitise all narration sections
+        for section in result.get("sections", []):
+            if section.get("narration"):
+                section["narration"] = sanitise_script(section["narration"])
+        if result.get("cta_narration"):
+            result["cta_narration"] = sanitise_script(result["cta_narration"])
+
+        return result
 
     except json.JSONDecodeError as e:
         return {"_error": f"JSON parse failed: {e}", "_raw": raw[:500]}
@@ -187,72 +256,304 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
         return {"_error": str(e)}
 
 
-def save_script(script, video, output_dir):
-    """Save as clean markdown — open in any teleprompter or editor."""
-    import os
-    from pathlib import Path
-    from datetime import datetime
+def format_script_terminal(script):
+    """Full terminal output of the production package."""
+    if not script:
+        return "  (Script generation failed)"
+    if script.get("_error"):
+        return f"  ⚠ Script error: {script['_error']}"
 
+    W = 65
+    lines = [
+        "",
+        "═" * W,
+        f"  📄  {script.get('title', 'Untitled')}",
+        "═" * W,
+        "",
+    ]
+
+    # Alternatives
+    alts = script.get("title_alternatives", [])
+    if alts:
+        lines += ["  📝  TITLE ALTERNATIVES"]
+        for a in alts:
+            lines.append(f"  → {a}")
+        lines.append("")
+
+    # Thumbnail
+    th = script.get("thumbnail", {})
+    if th:
+        lines += [
+            "─" * W,
+            "  🖼️   THUMBNAIL",
+            f"  Text    : {th.get('text_overlay','')}",
+            f"  Image   : {th.get('main_image','')}",
+            f"  Colors  : {th.get('color_scheme','')}",
+            f"  Mobile  : {th.get('mobile_test','')}",
+            "",
+        ]
+
+    # Key stats
+    lines += [
+        "─" * W,
+        f"  ⏱  Runtime: ~{script.get('estimated_runtime_mins','?')} min",
+        f"  💰 Est. CPM: {script.get('estimated_cpm','?')}",
+        f"  🎯 Hook score: {script.get('hook_score','?')}",
+        f"  😂 Funniest line: \"{script.get('funniest_line','')}\"",
+        f"  ✅ Safe: {script.get('banned_words_check','')}",
+        "",
+    ]
+
+    # Fear/Hope/Money map
+    fhm = script.get("fear_hope_money_map", [])
+    if fhm:
+        lines += ["─" * W, "  💡  FEAR → HOPE → MONEY → CONSEQUENCES"]
+        for item in fhm:
+            lines += [
+                f"  FEAR    : {item.get('fear','')}",
+                f"  HOPE    : {item.get('hope','')}",
+                f"  MONEY   : {item.get('money','')}",
+                f"  CREATES : {item.get('problem_created','')}",
+                f"  SOLVES  : {item.get('problem_solved','')}",
+                "",
+            ]
+
+    # Script sections
+    lines += ["─" * W, "  🎬  FULL SCRIPT"]
+    for section in script.get("sections", []):
+        lines += [
+            "",
+            f"  [{section.get('timestamp','')}] {section.get('name','').upper()}",
+            f"  Energy: {section.get('mrbeast_energy','')}",
+            "  " + "·" * (W - 4),
+            "",
+        ]
+        for para in section.get("narration", "").split("\n"):
+            if para.strip():
+                words = para.split()
+                line  = "  "
+                for word in words:
+                    if len(line) + len(word) + 1 > 67:
+                        lines.append(line)
+                        line = "  " + word + " "
+                    else:
+                        line += word + " "
+                if line.strip():
+                    lines.append(line)
+            else:
+                lines.append("")
+        if section.get("open_loop"):
+            lines += ["", f"  → {section['open_loop']}"]
+        lines.append("")
+
+    # Comment bait
+    cb = script.get("comment_bait", [])
+    if cb:
+        lines += ["─" * W, "  💬  COMMENT BAIT"]
+        for m in cb:
+            lines += [
+                f"  {m.get('timestamp','')} — \"{m.get('narration_line','')}\"",
+                f"  Expected: {m.get('expected_comment_type','')}",
+                "",
+            ]
+
+    # CTA
+    if script.get("cta_narration"):
+        lines += ["─" * W, "  📢  CTA", "", f"  {script['cta_narration']}", ""]
+
+    # Sponsorship
+    sp = script.get("sponsorship_angles", [])
+    if sp:
+        lines += ["─" * W, "  💼  SPONSORSHIP ANGLES"]
+        for s in sp:
+            lines.append(f"  › {s}")
+        lines.append("")
+
+    # Viral prediction
+    if script.get("viral_prediction"):
+        lines += ["─" * W, f"  🔮  {script['viral_prediction']}", ""]
+
+    lines += ["═" * W, ""]
+    return "\n".join(lines)
+
+
+def format_script_telegram(script, video):
+    """Full production package for Telegram — everything the creator needs."""
     if not script or script.get("_error"):
         return None
 
+    th  = script.get("thumbnail", {})
+    fhm = script.get("fear_hope_money_map", [{}])
+    cb  = script.get("comment_bait", [{}])
+    sp  = script.get("sponsorship_angles", [])
+    alts = script.get("title_alternatives", [])
+
+    # Build the message
+    msg = (
+        f"🧙 <b>FULL PRODUCTION PACKAGE</b>\n"
+        f"─────────────────────────\n\n"
+
+        f"🎬 <b>TITLE</b>\n"
+        f"<b>{script.get('title','')}</b>\n\n"
+    )
+
+    if alts:
+        msg += "<b>Alternatives:</b>\n"
+        for a in alts:
+            msg += f"  • {a}\n"
+        msg += "\n"
+
+    msg += (
+        f"🖼️ <b>THUMBNAIL</b>\n"
+        f"Text: <b>{th.get('text_overlay','')}</b>\n"
+        f"Show: {th.get('main_image','')}\n"
+        f"Colors: {th.get('color_scheme','')}\n\n"
+
+        f"⏱ {script.get('estimated_runtime_mins','?')} min  "
+        f"💰 CPM: {script.get('estimated_cpm','?')}  "
+        f"🎯 Hook: {script.get('hook_score','?')}\n\n"
+
+        f"😂 <b>Funniest line:</b>\n"
+        f"<i>\"{script.get('funniest_line','')}\"</i>\n\n"
+    )
+
+    # Fear/Hope/Money
+    if fhm and fhm[0]:
+        item = fhm[0]
+        msg += (
+            f"💡 <b>FEAR → HOPE → MONEY</b>\n"
+            f"😰 {item.get('fear','')}\n"
+            f"✨ {item.get('hope','')}\n"
+            f"💰 {item.get('money','')}\n"
+            f"⚡ Creates: {item.get('problem_created','')}\n"
+            f"✅ Solves: {item.get('problem_solved','')}\n\n"
+        )
+
+    # Hook
+    sections = script.get("sections", [])
+    if sections:
+        hook_section = sections[0]
+        narration_preview = hook_section.get("narration","")[:400]
+        msg += (
+            f"🎤 <b>HOOK (first 45 seconds)</b>\n"
+            f"<i>{narration_preview}...</i>\n\n"
+        )
+
+    # Comment bait
+    if cb and cb[0]:
+        msg += (
+            f"💬 <b>COMMENT BAIT</b>\n"
+            f"\"{cb[0].get('narration_line','')}\"n"
+            f"<i>{cb[0].get('expected_comment_type','')}</i>\n\n"
+        )
+
+    # Sponsorship
+    if sp:
+        msg += f"💼 <b>SPONSORSHIP ANGLE</b>\n{sp[0]}\n\n"
+
+    # Viral prediction
+    if script.get("viral_prediction"):
+        msg += f"🔮 <b>{script['viral_prediction']}</b>\n\n"
+
+    msg += (
+        f"✅ Monetisation safe: {script.get('banned_words_check','')}\n\n"
+        f"<a href='https://youtube.com/watch?v={video.get('id','')}'>"
+        f"Watch competitor video →</a>"
+    )
+
+    return msg
+
+
+def save_script(script, video, output_dir):
+    """Save complete production package as markdown."""
+    if not script or script.get("_error"):
+        return None
+
+    from pathlib import Path
     title    = script.get("title", "script").replace(" ", "_").replace("/", "-")[:50]
     ts       = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f"{ts}_{title}.md"
     filepath = Path(output_dir) / "scripts" / filename
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    funniest = script.get("funniest_line", "")
+    th  = script.get("thumbnail", {})
+    fhm = script.get("fear_hope_money_map", [])
 
     md = f"""# {script.get('title', 'Untitled')}
 
 > SORCERER · {datetime.now().strftime('%Y-%m-%d %H:%M')}
-> Source: [{video['title']}](https://youtube.com/watch?v={video['id']}) — {video['channel_title']}
-> Runtime: ~{script.get('estimated_runtime_mins', '?')} minutes
+> Source: [{video['title']}](https://youtube.com/watch?v={video['id']})
+> Runtime: ~{script.get('estimated_runtime_mins','?')} min · CPM: {script.get('estimated_cpm','?')}
 
 ---
 
-> 💀 **Funniest line:** *"{funniest}"*
+## Title Alternatives
+"""
+    for a in script.get("title_alternatives", []):
+        md += f"- {a}\n"
 
----
-
+    md += f"""
 ## Thumbnail
-{script.get('thumbnail_direction', '—')}
+- **Text:** {th.get('text_overlay','')}
+- **Image:** {th.get('main_image','')}
+- **Colors:** {th.get('color_scheme','')}
+- **Mobile test:** {th.get('mobile_test','')}
 
 ## SEO Tags
 `{' · '.join(script.get('seo_tags', []))}`
 
+## Description Hook
+{script.get('description_hook','')}
+
 ---
 
-## Pain → Profit Map
+## 😂 Funniest Line
+> "{script.get('funniest_line','')}"
+
+## Hook Score
+{script.get('hook_score','')}
+
+## Monetisation
+{script.get('banned_words_check','')} · Est. CPM: {script.get('estimated_cpm','')}
+
+---
+
+## Fear → Hope → Money → Consequences
 
 """
-    for item in script.get("pain_profit_map", []):
-        md += f"**Pain:** {item.get('pain','')}\n"
-        md += f"**Insight:** {item.get('insight','')}\n"
-        md += f"**Profit:** {item.get('profit','')}\n\n"
+    for item in fhm:
+        md += f"**Fear:** {item.get('fear','')}\n"
+        md += f"**Hope:** {item.get('hope','')}\n"
+        md += f"**Money:** {item.get('money','')}\n"
+        md += f"**Problem created:** {item.get('problem_created','')}\n"
+        md += f"**Problem solved:** {item.get('problem_solved','')}\n\n"
 
-    md += "---\n\n## Script\n\n"
-
+    md += "---\n\n## Full Script\n\n"
     for section in script.get("sections", []):
-        funny = section.get("funny_moment")
         md += f"### [{section.get('timestamp','')}] {section.get('name','').upper()}\n"
-        md += f"*~{section.get('duration_secs',0)}s · {section.get('pain_addressed','')}*\n\n"
+        md += f"*~{section.get('duration_secs',0)}s*\n\n"
+        md += f"**MrBeast energy check:** {section.get('mrbeast_energy','')}\n\n"
         md += f"{section.get('narration','')}\n\n"
-        if funny:
-            md += f"> 😂 **Funny moment:** *\"{funny}\"*\n\n"
         if section.get("open_loop"):
             md += f"> **→ Open loop:** {section['open_loop']}\n\n"
         md += "---\n\n"
 
     cb = script.get("comment_bait", [])
     if cb:
-        md += "## Comment Bait Moments\n\n"
+        md += "## Comment Bait\n\n"
         for m in cb:
             md += f"**{m.get('timestamp','')}** → *\"{m.get('narration_line','')}\"*\n"
-            md += f"_{m.get('why','')}_\n\n"
+            md += f"Expected: {m.get('expected_comment_type','')}\n\n"
 
     md += f"## CTA\n\n{script.get('cta_narration','')}\n\n"
+
+    sp = script.get("sponsorship_angles", [])
+    if sp:
+        md += "## Sponsorship Angles\n\n"
+        for s in sp:
+            md += f"- {s}\n"
+
+    md += f"\n## Viral Prediction\n\n{script.get('viral_prediction','')}\n\n"
 
     markers = script.get("chapter_markers", [])
     if markers:
@@ -269,33 +570,7 @@ def save_script(script, video, output_dir):
     filepath.write_text(md, encoding="utf-8")
     return str(filepath)
 
-def save_script_file(script, video, output_dir):
-    """Alias for save_script - keeps sorcerer.py import working."""
-    return save_script(script, video, output_dir)
 
-
-def format_script_terminal(script):
-    """Return a terminal-friendly summary of the generated script."""
-    if not script or script.get("_error"):
-        err = (script or {}).get("_error", "unknown")
-        return "  [Script error: " + str(err) + "]"
-    out = []
-    out.append("")
-    out.append("  " + "=" * 60)
-    out.append("  SCRIPT: " + script.get("title", "Untitled")[:54])
-    out.append("  " + "=" * 60)
-    funny = script.get("funniest_line", "")
-    if funny:
-        out.append("  Best line: " + funny[:54])
-        out.append("  " + "-" * 60)
-    for s in script.get("sections", []):
-        ts = s.get("timestamp", "")
-        name = s.get("name", "")
-        out.append("  [" + ts + "] " + name)
-    out.append("  " + "-" * 60)
-    runtime = str(script.get("estimated_runtime_mins", "?"))
-    tags = ", ".join(script.get("seo_tags", [])[:4])
-    out.append("  ~" + runtime + " mins | " + tags[:40])
-    out.append("  " + "=" * 60)
-    out.append("")
-    return "\n".join(out)
+# Keep old name for compatibility
+save_script_file = save_script
+format_script_terminal = format_script_terminal

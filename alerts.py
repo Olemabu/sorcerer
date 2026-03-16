@@ -161,13 +161,49 @@ def send_telegram(message, token, chat_id):
         return False
 
 
-def deliver(video, signal, baseline, intel, telegram_token, telegram_chat_id, log_fn=print):
-    """Format and deliver to all configured destinations."""
-    terminal_msg  = format_terminal(video, signal, baseline, intel)
+def deliver(video, signal, baseline, intel, telegram_token, telegram_chat_id, log_fn=print, script=None):
+    """Format and deliver signal + full production package to Telegram."""
+    terminal_msg = format_terminal(video, signal, baseline, intel)
     log_fn(terminal_msg)
 
+    # Send signal alert first
     telegram_msg = format_telegram(video, signal, baseline, intel)
     if send_telegram(telegram_msg, telegram_token, telegram_chat_id):
-        log_fn("  → Telegram alert sent ✓")
+        log_fn("  → Telegram signal alert sent ✓")
     else:
         log_fn("  → Telegram not configured (terminal only)")
+        return
+
+    # Send full production package if script is available
+    if script and not script.get("_error"):
+        try:
+            from scriptwriter import format_script_telegram
+            production_msg = format_script_telegram(script, video)
+            if production_msg:
+                # Split into chunks if too long (Telegram 4096 char limit)
+                if len(production_msg) <= 4000:
+                    send_telegram(production_msg, telegram_token, telegram_chat_id)
+                else:
+                    # Send in parts
+                    parts = [production_msg[i:i+3800] for i in range(0, len(production_msg), 3800)]
+                    for i, part in enumerate(parts):
+                        prefix = f"📄 <b>Production Package ({i+1}/{len(parts)})</b>\n\n" if i > 0 else ""
+                        send_telegram(prefix + part, telegram_token, telegram_chat_id)
+                log_fn("  → Full production package sent to Telegram ✓")
+                # Send Gemini thumbnail prompt as separate easy-to-copy message
+                try:
+                    gemini_prompt = script.get("thumbnail", {}).get("gemini_prompt", "")
+                    if gemini_prompt:
+                        gemini_msg = (
+                            "🎨 <b>THUMBNAIL — GEMINI PROMPT</b>\n"
+                            "─────────────────────────\n"
+                            "Copy this → paste into gemini.google.com/app\n"
+                            "Click Imagen → Generate 4 variations → pick best\n\n"
+                            f"{gemini_prompt}"
+                        )
+                        send_telegram(gemini_msg, telegram_token, telegram_chat_id)
+                        log_fn("  → Gemini thumbnail prompt sent ✓")
+                except Exception:
+                    pass
+        except Exception as e:
+            log_fn(f"  ⚠ Could not send production package: {e}")
