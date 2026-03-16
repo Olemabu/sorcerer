@@ -84,6 +84,14 @@ Your writing style combines:
 - Vice documentary's gritty authenticity — real stakes, real people, real consequences
 - The Economist's authority — every claim backed by data, names, numbers
 
+CRITICAL — FULL SCRIPT REQUIREMENT:
+You are writing the COMPLETE word-for-word narration. Not an outline. Not summaries.
+Every section must contain the ACTUAL WORDS the creator speaks on camera.
+A person must be able to record this video RIGHT NOW using only what you write.
+Minimum 150 words per section. The hook alone should be 100+ words.
+If the video is 19 minutes, the narration should be approximately 2,850 words total.
+DO NOT summarise. DO NOT use bullet points inside narration. WRITE THE ACTUAL SCRIPT.
+
 CRITICAL — MRBEAST ENERGY RULES:
 1. The first 10 seconds must make it IMPOSSIBLE to click away
 2. Every 90 seconds — a new revelation, a shocking stat, a tonal shift
@@ -169,8 +177,8 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
       "mrbeast_energy": "What keeps this from being skippable in this section",
       "visual_treatment": "black_title_card",
       "pain_addressed": "The exact fear or desire activated here",
-      "narration": "Full word-for-word narration. Natural spoken language. Monetisation safe. Include [VISUAL CUE: ...], [MUSIC: ...], [PAUSE], [TITLE CARD: ...] markers. MrBeast energy throughout.",
-      "funny_moment": "The specific funny line or observation, or null",
+      "narration": "THE COMPLETE WORD-FOR-WORD SCRIPT for this section. Every single sentence the narrator speaks out loud. Not a summary. Not bullet points. The actual words. Natural conversational spoken English. Monetisation safe. Include [VISUAL CUE: description] markers for b-roll. Include [MUSIC: instruction] for music cues. Include [PAUSE] for dramatic silence. Include [TITLE CARD: text] for on-screen text. Write enough that a creator could record this section RIGHT NOW with no additional preparation needed. Minimum 150 words per section.",
+      "funny_moment": "The specific funny line or observation in this section, or null",
       "open_loop": "What tension this creates that forces them to keep watching",
       "broll_keywords": ["keyword1", "keyword2", "keyword3"],
       "conversion_note": "What makes this section drive watch time specifically"
@@ -196,11 +204,22 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
     }}
   ],
 
-  "cta_narration": "Full CTA. 30-45 seconds. Gets subscribe + comment + next video. Funny if possible. Never salesy.",
+  "cta_narration": "Full word-for-word CTA narration. 30-45 seconds. Natural spoken language. Gets subscribe + comment + next video simultaneously. Funny if possible. Never reads like a sales pitch.",
 
   "ad_placement_suggestions": [
-    "Where to place mid-roll ads without killing watch time"
+    "Timestamp and reason — e.g. 4:30 — after the fear section, before the hope reveal. Viewer is hooked and will sit through an ad to get the answer."
   ],
+
+  "youtube_ads_strategy": {{
+    "should_run_ads": true,
+    "mentor_advice": "Write this as a experienced YouTube mentor talking to a complete beginner. Tone: warm, direct, like a friend who already bought a Lambo from YouTube revenue explaining exactly how you get there too. No jargon. Real numbers. Real steps. Include: when to start ads, how much to spend first, what to look for, when to scale, what mistake beginners make that wastes money.",
+    "first_ad_budget": "Exact amount to start with and why",
+    "when_to_launch_ads": "Exact timing relative to upload — not vague, specific",
+    "target_cpm_to_aim_for": "What CPM means and what number to aim for in this niche",
+    "scale_trigger": "The exact signal that tells you to increase budget",
+    "biggest_beginner_mistake": "The one mistake that wastes 80 percent of ad spend for new channels",
+    "lambo_milestone": "Honest projection — if this video performs and you run ads correctly, what does the revenue look like at 100K, 500K, 1M views in this niche"
+  }},
 
   "sponsorship_angles": [
     "Natural sponsorship integration points for health tech or AI tool brands"
@@ -451,6 +470,35 @@ def format_script_telegram(script, video):
     if sp:
         msg += f"💼 <b>SPONSORSHIP ANGLE</b>\n{sp[0]}\n\n"
 
+    # YouTube Ads strategy — Lambo mentor persona
+    ads = script.get("youtube_ads_strategy", {})
+    if ads:
+        msg += (
+            f"🚗 <b>YOUR PATH TO THE LAMBO — ADS STRATEGY</b>\n"
+            f"─────────────────────────\n"
+            f"{ads.get('mentor_advice','')}\n\n"
+            f"💵 Start with: {ads.get('first_ad_budget','')}\n"
+            f"⏰ Launch ads: {ads.get('when_to_launch_ads','')}\n"
+            f"📊 Target CPM: {ads.get('target_cpm_to_aim_for','')}\n"
+            f"📈 Scale when: {ads.get('scale_trigger','')}\n"
+            f"⚠️ Biggest mistake: {ads.get('biggest_beginner_mistake','')}\n\n"
+            f"🏎 <b>Lambo Projection:</b>\n{ads.get('lambo_milestone','')}\n\n"
+        )
+
+    # Full script sections
+    sections = script.get("sections", [])
+    if sections:
+        msg += "📜 <b>FULL SCRIPT</b>\n─────────────────────────\n\n"
+        for section in sections:
+            narration = section.get("narration", "")
+            # Send each section
+            section_msg = (
+                f"🎬 <b>[{section.get('timestamp','')}] {section.get('name','').upper()}</b>\n"
+                f"<i>~{section.get('duration_secs',0)}s</i>\n\n"
+                f"{narration}"
+            )
+            msg += section_msg + "\n\n"
+
     # Viral prediction
     if script.get("viral_prediction"):
         msg += f"🔮 <b>{script['viral_prediction']}</b>\n\n"
@@ -554,6 +602,18 @@ def save_script(script, video, output_dir):
             md += f"- {s}\n"
 
     md += f"\n## Viral Prediction\n\n{script.get('viral_prediction','')}\n\n"
+
+    # YouTube Ads strategy
+    ads = script.get("youtube_ads_strategy", {})
+    if ads:
+        md += "## 🚗 YouTube Ads Strategy — Your Path to the Lambo\n\n"
+        md += f"{ads.get('mentor_advice','')}\n\n"
+        md += f"**Start budget:** {ads.get('first_ad_budget','')}\n"
+        md += f"**Launch timing:** {ads.get('when_to_launch_ads','')}\n"
+        md += f"**Target CPM:** {ads.get('target_cpm_to_aim_for','')}\n"
+        md += f"**Scale when:** {ads.get('scale_trigger','')}\n"
+        md += f"**Biggest beginner mistake:** {ads.get('biggest_beginner_mistake','')}\n\n"
+        md += f"### 🏎 Lambo Projection\n\n{ads.get('lambo_milestone','')}\n\n"
 
     markers = script.get("chapter_markers", [])
     if markers:
