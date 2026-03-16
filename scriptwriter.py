@@ -84,13 +84,38 @@ Your writing style combines:
 - Vice documentary's gritty authenticity — real stakes, real people, real consequences
 - The Economist's authority — every claim backed by data, names, numbers
 
-CRITICAL — FULL SCRIPT REQUIREMENT:
-You are writing the COMPLETE word-for-word narration. Not an outline. Not summaries.
-Every section must contain the ACTUAL WORDS the creator speaks on camera.
-A person must be able to record this video RIGHT NOW using only what you write.
-Minimum 150 words per section. The hook alone should be 100+ words.
-If the video is 19 minutes, the narration should be approximately 2,850 words total.
-DO NOT summarise. DO NOT use bullet points inside narration. WRITE THE ACTUAL SCRIPT.
+CRITICAL — THIS IS THE MOST IMPORTANT INSTRUCTION IN THIS ENTIRE PROMPT:
+You are writing the COMPLETE word-for-word narration script. 
+NOT an outline. NOT a summary. NOT bullet points. NOT a description of what to say.
+THE ACTUAL WORDS. EVERY SINGLE WORD. THE COMPLETE SENTENCES.
+
+A human must be able to sit down RIGHT NOW, press record, and read your narration 
+word for word with ZERO additional preparation.
+
+If a section is 60 seconds long that is approximately 150 words of narration.
+If a section is 2 minutes long that is approximately 300 words of narration.
+If the video is 15 minutes total that is approximately 2,250 words of narration.
+If the video is 19 minutes total that is approximately 2,850 words of narration.
+
+COUNT YOUR WORDS. If any section has fewer than 100 words of actual narration 
+you have FAILED this instruction. Rewrite it until it is complete.
+
+DO NOT write:
+- "Narrator explains the background of AI in healthcare..."
+- "This section covers the economic implications..."  
+- "Introduce the main argument here..."
+- "[Explain how AI works]"
+- Any bullet points inside the narration field
+
+DO write:
+"Last Tuesday a hospital in San Francisco made a decision that shocked the entire 
+medical establishment. They fired their radiology department. All of it. Every 
+single radiologist. Gone. Not because they were bad at their jobs. They were 
+excellent. But because an AI system — one that costs less per month than your 
+internet bill — had just outperformed every single one of them on a blind test 
+of ten thousand X-rays. [PAUSE] Let that sit for a second."
+
+THAT is what narration looks like. Full sentences. Spoken language. Real words.
 
 CRITICAL — MRBEAST ENERGY RULES:
 1. The first 10 seconds must make it IMPOSSIBLE to click away
@@ -177,7 +202,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
       "mrbeast_energy": "What keeps this from being skippable in this section",
       "visual_treatment": "black_title_card",
       "pain_addressed": "The exact fear or desire activated here",
-      "narration": "THE COMPLETE WORD-FOR-WORD SCRIPT for this section. Every single sentence the narrator speaks out loud. Not a summary. Not bullet points. The actual words. Natural conversational spoken English. Monetisation safe. Include [VISUAL CUE: description] markers for b-roll. Include [MUSIC: instruction] for music cues. Include [PAUSE] for dramatic silence. Include [TITLE CARD: text] for on-screen text. Write enough that a creator could record this section RIGHT NOW with no additional preparation needed. Minimum 150 words per section.",
+      "narration": "THE COMPLETE WORD-FOR-WORD NARRATION. Every sentence spoken by the narrator. Nothing left out. Nothing summarised. This field must contain 150-400 words of ACTUAL SPOKEN SCRIPT depending on section length. Natural spoken English — write how a person talks, not how they write. Monetisation safe. Weave in [VISUAL CUE: specific description] markers inline where b-roll should change. Weave in [PAUSE] for dramatic silence. Weave in [TITLE CARD: exact text] for on-screen text moments. Weave in [MUSIC: specific instruction] for music changes. EXAMPLE OF CORRECT FORMAT: Last Tuesday, a hospital in Boston fired their entire radiology department. Not downsized. Fired. All 47 of them. [PAUSE] [VISUAL CUE: empty hospital corridor, no people, fluorescent lights] The AI system that replaced them costs forty dollars a month. [TITLE CARD: $40/MONTH] I want you to sit with that number. Forty dollars. That is less than your Netflix subscription. That is two large pizzas. [PAUSE] And it just made forty-seven highly trained medical professionals redundant. THAT is how you write narration. DO NOT give me anything less than this.",
       "funny_moment": "The specific funny line or observation in this section, or null",
       "open_loop": "What tension this creates that forces them to keep watching",
       "broll_keywords": ["keyword1", "keyword2", "keyword3"],
@@ -250,7 +275,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
             },
             json={
                 "model":      CLAUDE_MODEL,
-                "max_tokens": 10000,
+                "max_tokens": 16000,
                 "messages":   [{"role": "user", "content": prompt}],
             },
             timeout=120,
