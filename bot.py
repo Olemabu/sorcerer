@@ -96,7 +96,16 @@ class SorcererBot:
             "/watch keyword — Monitor a topic on Google Trends\n"
             "/trends — See all trend keywords\n\n"
             "<b>Info</b>\n"
-            "/status — How SORCERER is doing\n"
+            "/status — How SORCERER is doing\n\n"
+            "<b>AI Director</b>\n"
+            "/direct — Direct your last script\n"
+            "/scorsese /mrbeast /capcut /hybrid\n\n"
+            "<b>Review & Publish</b>\n"
+            "/approve — Upload video to all platforms\n"
+            "/revise [notes] — Change something\n"
+            "/restyle [style] — New visual style\n"
+            "/preview_script — Read the full script\n"
+            "/discard — Scrap this video\n\n"
             "/help — Show this message",
             chat_id
         )
@@ -293,6 +302,179 @@ class SorcererBot:
 
         self.send(summary, chat_id)
 
+    def handle_direct(self, chat_id, args):
+        """Run AI Director on the last generated script."""
+        style = args[0].lower() if args else "hybrid"
+        valid_styles = ["scorsese", "mrbeast", "capcut", "hybrid"]
+
+        if style not in valid_styles:
+            self.send(
+                f"Choose a style:\n\n"
+                f"/direct hybrid — Scorsese depth + MrBeast energy (recommended)\n"
+                f"/direct scorsese — Pure cinematic documentary\n"
+                f"/direct mrbeast — Maximum energy chaos\n"
+                f"/direct capcut — Viral social media style",
+                chat_id
+            )
+            return
+
+        self.send(
+            f"🎬 <b>AI Director is reviewing your script...</b>\n\n"
+            f"Style: <b>{style.upper()}</b>\n"
+            f"Analysing emotional clusters, colour narrative,\n"
+            f"viral moments, replayability...\n\n"
+            f"This takes about 30 seconds.",
+            chat_id
+        )
+
+        # Load the most recent script from the scripts folder
+        import os
+        from pathlib import Path
+        scripts_dir = Path(self.db_file).parent / "scripts"
+
+        if not scripts_dir.exists():
+            self.send("No scripts found yet. A script is generated automatically when SORCERER detects a viral signal.", chat_id)
+            return
+
+        script_files = sorted(scripts_dir.glob("*.md"), key=os.path.getmtime, reverse=True)
+        if not script_files:
+            self.send("No scripts found yet.", chat_id)
+            return
+
+        # We need the JSON version — check if there is a companion JSON
+        json_scripts = sorted(Path(self.db_file).parent.glob("scripts/*.json"),
+                              key=os.path.getmtime, reverse=True)
+
+        if not json_scripts:
+            self.send(
+                f"Found {len(script_files)} script(s) but no JSON version to direct.\n"
+                f"Scripts are automatically directed when a signal fires.",
+                chat_id
+            )
+            return
+
+        try:
+            import json
+            script = json.loads(json_scripts[0].read_text())
+            anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+            from director import direct, format_direction_telegram
+            direction = direct(
+                script         = script,
+                style          = style,
+                target_culture = "global",
+                anthropic_key  = anthropic_key,
+                log_fn         = self.log_fn,
+            )
+
+            if direction and not direction.get("_error"):
+                msg = format_direction_telegram(direction)
+                self.send(msg or "Direction complete.", chat_id)
+            else:
+                self.send(f"Direction failed: {direction.get('_error','unknown error')}", chat_id)
+
+        except Exception as e:
+            self.send(f"⚠ Error: {e}", chat_id)
+
+    def handle_approve(self, chat_id, args):
+        """Approve the pending video for upload."""
+        import os
+        from approval import ApprovalManager
+        mgr  = ApprovalManager(self.db_file, self.token, self.chat_id, self.log_fn)
+        item = mgr.approve()
+        if item and self.scan_fn:
+            # Trigger upload in background
+            threading.Thread(
+                target=self._do_upload,
+                args=(item, mgr),
+                daemon=True
+            ).start()
+
+    def _do_upload(self, item, mgr):
+        """Upload approved video to all platforms."""
+        try:
+            from publisher import publish_all, build_config_from_env
+            import os
+            config      = build_config_from_env()
+            youtube_url = "https://youtube.com"
+            results     = publish_all(
+                master_video_path = item.get("video_path"),
+                clips             = item.get("clips", {}),
+                captions          = item.get("captions", {}),
+                youtube_url       = youtube_url,
+                config            = config,
+                log_fn            = self.log_fn,
+            )
+            mgr.confirm_all_uploaded(item["id"], results)
+        except Exception as e:
+            self.send(f"⚠ Upload error: {e}", self.chat_id)
+
+    def handle_revise(self, chat_id, args):
+        """Revise the pending video."""
+        if not args:
+            self.send(
+                "Tell me what to change.\n\n"
+                "Examples:\n"
+                "/revise make the hook faster\n"
+                "/revise the tone is too serious, add more humor\n"
+                "/revise change the opening to a shocking stat\n"
+                "/revise the music feels wrong for the middle section",
+                chat_id
+            )
+            return
+        notes = " ".join(args)
+        from approval import ApprovalManager
+        mgr = ApprovalManager(self.db_file, self.token, self.chat_id, self.log_fn)
+        mgr.revise(notes)
+
+    def handle_restyle(self, chat_id, args):
+        """Change the visual style of the pending video."""
+        valid = ["scorsese", "mrbeast", "capcut", "hybrid"]
+        style = args[0].lower() if args else ""
+        if style not in valid:
+            self.send(
+                f"Choose a style:\n"
+                f"/restyle hybrid — Best of all three (recommended)\n"
+                f"/restyle scorsese — Pure cinematic\n"
+                f"/restyle mrbeast — Maximum energy\n"
+                f"/restyle capcut — Viral social",
+                chat_id
+            )
+            return
+        from approval import ApprovalManager
+        mgr = ApprovalManager(self.db_file, self.token, self.chat_id, self.log_fn)
+        mgr.restyle(style)
+
+    def handle_discard(self, chat_id, args):
+        """Discard the pending video."""
+        from approval import ApprovalManager
+        mgr = ApprovalManager(self.db_file, self.token, self.chat_id, self.log_fn)
+        mgr.discard()
+
+    def handle_preview_script(self, chat_id, args):
+        """Send the full script of the pending video."""
+        from approval import ApprovalManager
+        mgr  = ApprovalManager(self.db_file, self.token, self.chat_id, self.log_fn)
+        item = mgr.get_pending()
+        if not item:
+            self.send("No video pending review.", chat_id)
+            return
+        script   = item.get("script", {})
+        sections = script.get("sections", [])
+        if not sections:
+            self.send("No script found for pending video.", chat_id)
+            return
+        # Send script in chunks
+        for section in sections[:5]:
+            msg = (
+                f"📜 <b>[{section.get('timestamp','')}] "
+                f"{section.get('name','').upper()}</b>\n\n"
+                f"{section.get('narration','')[:1200]}"
+            )
+            self.send(msg, chat_id)
+            import time
+            time.sleep(0.5)
+
     def handle_status(self, chat_id):
         db    = self.load_db()
         last  = db.get("last_scan")
@@ -344,6 +526,16 @@ class SorcererBot:
             "/ai_healthcare": lambda: self.handle_setup(chat_id, ["ai_healthcare"]),
             "/ai_innovation": lambda: self.handle_setup(chat_id, ["ai_innovation"]),
             "/full":        lambda: self.handle_setup(chat_id, ["full"]),
+            "/direct":         lambda: self.handle_direct(chat_id, args),
+            "/scorsese":       lambda: self.handle_direct(chat_id, ["scorsese"]),
+            "/mrbeast":        lambda: self.handle_direct(chat_id, ["mrbeast"]),
+            "/capcut":         lambda: self.handle_direct(chat_id, ["capcut"]),
+            "/hybrid":         lambda: self.handle_direct(chat_id, ["hybrid"]),
+            "/approve":        lambda: self.handle_approve(chat_id, args),
+            "/revise":         lambda: self.handle_revise(chat_id, args),
+            "/restyle":        lambda: self.handle_restyle(chat_id, args),
+            "/discard":        lambda: self.handle_discard(chat_id, args),
+            "/preview_script": lambda: self.handle_preview_script(chat_id, args),
         }
         handler = handlers.get(command)
         if handler:
