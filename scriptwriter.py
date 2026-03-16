@@ -12,12 +12,23 @@ Claude Opus only. This is the product.
 
 import json
 import re
+import os
 import requests
 from datetime import datetime
 from pathlib import Path
 
-CLAUDE_MODEL  = "claude-opus-4-5"
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+from api_utils import claude_request
+
+# ── Model selection ────────────────────────────────────────────────────────
+# Set SCRIPT_MODEL in Railway Variables to switch without redeploying:
+#   "opus"   → best quality, ~$0.08/script  (default)
+#   "sonnet" → good quality, ~$0.01/script  (use when credits are low)
+_MODEL_MAP = {
+    "opus":   "claude-opus-4-5-20250514",
+    "sonnet": "claude-sonnet-4-6",
+}
+_model_choice = os.getenv("SCRIPT_MODEL", "opus").lower().strip()
+CLAUDE_MODEL  = _MODEL_MAP.get(_model_choice, _MODEL_MAP["opus"])
 
 # ── YouTube banned/demonetised words to avoid ─────────────────────────────────
 BANNED_WORDS = [
@@ -265,39 +276,28 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
   "viral_prediction": "Honest assessment — will this video perform? Why?"
 }}"""
 
-    try:
-        r = requests.post(
-            ANTHROPIC_URL,
-            headers={
-                "x-api-key":         anthropic_key,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json={
-                "model":      CLAUDE_MODEL,
-                "max_tokens": 16000,
-                "messages":   [{"role": "user", "content": prompt}],
-            },
-            timeout=120,
-        )
-        r.raise_for_status()
-        raw = r.json()["content"][0]["text"].strip()
-        raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(raw)
+    result = claude_request(
+        model      = CLAUDE_MODEL,
+        prompt     = prompt,
+        api_key    = anthropic_key,
+        max_tokens = 16000,
+        timeout    = 120,
+        retries    = 2,
+        backoff    = 5.0,
+    )
 
-        # Sanitise all narration sections
-        for section in result.get("sections", []):
-            if section.get("narration"):
-                section["narration"] = sanitise_script(section["narration"])
-        if result.get("cta_narration"):
-            result["cta_narration"] = sanitise_script(result["cta_narration"])
-
+    # If API failed, return the error dict as-is
+    if result.get("_error"):
         return result
 
-    except json.JSONDecodeError as e:
-        return {"_error": f"JSON parse failed: {e}", "_raw": raw[:500]}
-    except Exception as e:
-        return {"_error": str(e)}
+    # Sanitise all narration sections
+    for section in result.get("sections", []):
+        if section.get("narration"):
+            section["narration"] = sanitise_script(section["narration"])
+    if result.get("cta_narration"):
+        result["cta_narration"] = sanitise_script(result["cta_narration"])
+
+    return result
 
 
 def format_script_terminal(script):
@@ -487,7 +487,7 @@ def format_script_telegram(script, video):
     if cb and cb[0]:
         msg += (
             f"💬 <b>COMMENT BAIT</b>\n"
-            f"\"{cb[0].get('narration_line','')}\"n"
+            f"\"{cb[0].get('narration_line','')}\"\n"
             f"<i>{cb[0].get('expected_comment_type','')}</i>\n\n"
         )
 

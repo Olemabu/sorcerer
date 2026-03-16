@@ -14,9 +14,9 @@ Returns:
 import json
 import requests
 
+from api_utils import claude_request
 
 CLAUDE_MODEL = "claude-sonnet-4-6"
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 
 def analyse(video, signal, baseline, comments, anthropic_key):
@@ -92,27 +92,12 @@ Return ONLY valid JSON. No markdown. No explanation outside the JSON object.
   "urgency_note": "One sentence. How much time does the creator realistically have before this window closes?"
 }}"""
 
-    try:
-        r = requests.post(
-            ANTHROPIC_URL,
-            headers={
-                "x-api-key":         anthropic_key,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json={
-                "model":      CLAUDE_MODEL,
-                "max_tokens": 1200,
-                "messages":   [{"role": "user", "content": prompt}],
-            },
-            timeout=45,
-        )
-        r.raise_for_status()
-        raw = r.json()["content"][0]["text"].strip()
-        raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-        return json.loads(raw)
-
-    except json.JSONDecodeError as e:
-        return {"_error": f"JSON parse failed: {e}", "_raw": raw[:300]}
-    except Exception as e:
-        return {"_error": str(e)}
+    return claude_request(
+        model      = CLAUDE_MODEL,
+        prompt     = prompt,
+        api_key    = anthropic_key,
+        max_tokens = 1200,
+        timeout    = 45,
+        retries    = 2,
+        backoff    = 3.0,
+    )

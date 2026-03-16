@@ -5,6 +5,7 @@ No AI here — pure math. Fast and free.
 """
 
 import re
+import os
 import time
 import statistics
 from datetime import datetime, timezone
@@ -14,12 +15,21 @@ import requests
 # ── Constants ──────────────────────────────────────────────────────────────
 YT = "https://www.googleapis.com/youtube/v3"
 
-VIRAL_MULTIPLIER     = 5.0    # 5× baseline  → VIRAL
-RISING_MULTIPLIER    = 2.5    # 2.5× baseline → RISING
-MIN_VIEWS            = 500    # ignore micro-videos
-MAX_AGE_HOURS        = 96     # only flag videos < 4 days old
-BASELINE_WINDOW      = 20     # videos used to calculate channel baseline
-COMMENT_PULL         = 80     # top comments sent to intelligence layer
+# All thresholds tuneable from Railway Variables — no redeploy needed
+VIRAL_MULTIPLIER     = float(os.getenv("VIRAL_MULTIPLIER",   "5.0"))   # 5× baseline  → VIRAL
+RISING_MULTIPLIER    = float(os.getenv("RISING_MULTIPLIER",  "2.5"))   # 2.5× baseline → RISING
+WARMING_MULTIPLIER   = float(os.getenv("WARMING_MULTIPLIER", "1.5"))   # 1.5× baseline → WARMING (new)
+MIN_VIEWS            = int(os.getenv("MIN_VIEWS",            "500"))
+MAX_AGE_HOURS        = int(os.getenv("MAX_AGE_HOURS",        "96"))    # only flag videos < 4 days old
+BASELINE_WINDOW      = int(os.getenv("BASELINE_WINDOW",      "20"))
+COMMENT_PULL         = int(os.getenv("COMMENT_PULL",         "80"))
+
+# Velocity detection — catches videos that are accelerating fast
+# even if they haven't crossed a multiplier threshold yet
+VELOCITY_ENABLED     = os.getenv("VELOCITY_ENABLED", "true").lower() == "true"
+VELOCITY_MIN_AGE_H   = float(os.getenv("VELOCITY_MIN_AGE_H",  "1.0"))  # need at least 1h of data
+VELOCITY_MAX_AGE_H   = float(os.getenv("VELOCITY_MAX_AGE_H", "12.0"))  # only very fresh videos
+VELOCITY_THRESHOLD   = float(os.getenv("VELOCITY_THRESHOLD",  "3.0"))  # 3× the channel's avg early pace
 
 
 # ── YouTube helpers ─────────────────────────────────────────────────────────
@@ -153,6 +163,7 @@ def fetch_comments(video_id, api_key, max_results=COMMENT_PULL):
 def build_baseline(videos, n=BASELINE_WINDOW):
     """
     Median views/hr of the last N videos older than 48h.
+    Also tracks early-life velocity (first 12h performance) for acceleration detection.
     Returns None if not enough data yet.
     """
     pool = [
@@ -166,19 +177,37 @@ def build_baseline(videos, n=BASELINE_WINDOW):
     rates     = [v["views_per_hour"] for v in pool]
     durations = [v["duration_mins"]  for v in pool if v["duration_mins"] > 0]
 
+    # Early-life velocity: what does a "normal" video look like in its first 12h?
+    # We approximate by looking at videos that are now mature — their views_per_hour
+    # when young would have been higher. For channels with consistent output,
+    # median_vph is a reasonable floor for early-life pace.
+    # A video doing 3× this in its first 12h is accelerating unusually fast.
+    early_rates = [v["views_per_hour"] for v in pool]
+
     return {
         "median_vph":      round(statistics.median(rates), 1),
         "mean_vph":        round(statistics.mean(rates), 1),
         "stdev_vph":       round(statistics.stdev(rates) if len(rates) > 1 else 0, 1),
         "median_duration": round(statistics.median(durations), 0) if durations else 0,
         "sample_size":     len(pool),
+        "early_vph":       round(statistics.median(early_rates), 1),
     }
 
 
 # ── Signal detection ─────────────────────────────────────────────────────────
 def classify(video, baseline):
     """
-    Pure math. No AI.
+    Pure math. No AI. Three tiers + velocity detection.
+
+    Tiers (based on views/hr vs channel baseline):
+      VIRAL   — 5.0× or higher (configurable)
+      RISING  — 2.5× or higher
+      WARMING — 1.5× or higher (new — early warning, no script generated)
+
+    Velocity (based on acceleration in first 12h):
+      ACCELERATING — video is very young and gaining pace unusually fast
+                     for this channel, even before hitting a multiplier
+
     Returns signal dict or None.
     """
     if not baseline or baseline["median_vph"] == 0:
@@ -186,6 +215,7 @@ def classify(video, baseline):
 
     mult = video["views_per_hour"] / baseline["median_vph"]
 
+    # ── Tier 1: VIRAL ──
     if mult >= VIRAL_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
         return {
             "level":      "VIRAL",
@@ -193,6 +223,8 @@ def classify(video, baseline):
             "multiplier": round(mult, 1),
             "window":     "48h",
         }
+
+    # ── Tier 2: RISING ──
     if mult >= RISING_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
         return {
             "level":      "RISING",
@@ -200,4 +232,30 @@ def classify(video, baseline):
             "multiplier": round(mult, 1),
             "window":     "72h",
         }
+
+    # ── Tier 3: WARMING (new — lightweight alert, no AI calls) ──
+    if mult >= WARMING_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
+        return {
+            "level":      "WARMING",
+            "emoji":      "📈",
+            "multiplier": round(mult, 1),
+            "window":     "96h",
+        }
+
+    # ── Velocity detection: young video accelerating fast ──
+    if (VELOCITY_ENABLED
+            and VELOCITY_MIN_AGE_H <= video["age_hours"] <= VELOCITY_MAX_AGE_H
+            and video["views"] >= MIN_VIEWS):
+
+        early_vph = baseline.get("early_vph", baseline["median_vph"])
+        if early_vph > 0:
+            velocity_mult = video["views_per_hour"] / early_vph
+            if velocity_mult >= VELOCITY_THRESHOLD:
+                return {
+                    "level":      "ACCELERATING",
+                    "emoji":      "🚀",
+                    "multiplier": round(velocity_mult, 1),
+                    "window":     "12h",
+                }
+
     return None

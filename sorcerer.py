@@ -58,12 +58,33 @@ LOG_FILE = DATA_DIR / "sorcerer_log.txt"
 
 
 # ── DB ──────────────────────────────────────────────────────────────────────
+ALERT_EXPIRY_DAYS = 7   # forget alerts older than this — prevents unbounded growth
+
 def load_db():
     if DB_FILE.exists():
-        return json.loads(DB_FILE.read_text())
+        db = json.loads(DB_FILE.read_text())
+
+        # ── Migrate: list → dict with timestamps ──
+        # Old format: ["videoId_VIRAL", ...]
+        # New format: {"videoId_VIRAL": "2026-03-16T12:00:00", ...}
+        if isinstance(db.get("seen_alerts"), list):
+            db["seen_alerts"] = {
+                key: datetime.now().isoformat()
+                for key in db["seen_alerts"]
+            }
+
+        # ── Expire old entries ──
+        cutoff = datetime.now().timestamp() - (ALERT_EXPIRY_DAYS * 86400)
+        db["seen_alerts"] = {
+            key: ts for key, ts in db["seen_alerts"].items()
+            if datetime.fromisoformat(ts).timestamp() > cutoff
+        }
+
+        return db
+
     return {
         "channels":    {},
-        "seen_alerts": [],
+        "seen_alerts": {},
         "scans":       0,
         "last_scan":   None,
         "total_alerts": 0,
@@ -149,10 +170,39 @@ def run_scan(db, quiet=False):
                 if key in db["seen_alerts"]:
                     continue
 
-                # NEW SIGNAL — fire intelligence layer
+                # NEW SIGNAL — route by tier
                 if not quiet: print(f"\n  {signal['emoji']}  SIGNAL DETECTED!")
                 log(f"Signal: {signal['level']} — {video['channel_title']}: {video['title'][:60]}")
 
+                # ── Lightweight tiers: WARMING / ACCELERATING ──
+                # These are early warnings — no AI calls, no script, no cost.
+                # Just a Telegram heads-up so you can watch it manually.
+                if signal["level"] in ("WARMING", "ACCELERATING"):
+                    if TG_TOKEN and TG_CHAT:
+                        from alerts import send_telegram
+                        early_msg = (
+                            f"{signal['emoji']} <b>{signal['level']} SIGNAL</b>\n\n"
+                            f"<b>{video['title']}</b>\n"
+                            f"Channel: {video['channel_title']}\n"
+                            f"Views: {video['views']:,} in {video['age_hours']:.0f}h\n"
+                            f"Pace: {video['views_per_hour']:,.0f} views/hr "
+                            f"({signal['multiplier']}× baseline)\n"
+                            f"Window: {signal['window']}\n\n"
+                            f"<i>Early warning — watching this one. "
+                            f"Full package fires if it hits RISING.</i>\n\n"
+                            f"<a href='https://youtube.com/watch?v={video['id']}'>Watch →</a>"
+                        )
+                        send_telegram(early_msg, TG_TOKEN, TG_CHAT)
+                    log(f"  → {signal['level']} alert sent (no AI cost)")
+
+                    db["seen_alerts"][key] = datetime.now().isoformat()
+                    db["total_alerts"] = db.get("total_alerts", 0) + 1
+                    db["channels"][cid]["alert_count"] = ch.get("alert_count", 0) + 1
+                    new_alerts.append((video, signal))
+                    found += 1
+                    continue
+
+                # ── Full tiers: RISING / VIRAL — fire the whole pipeline ──
                 comments = fetch_comments(video["id"], YT_KEY)
                 intel    = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
 
@@ -197,7 +247,7 @@ def run_scan(db, quiet=False):
                     script=script,
                 )
 
-                db["seen_alerts"].append(key)
+                db["seen_alerts"][key] = datetime.now().isoformat()
                 db["total_alerts"] = db.get("total_alerts", 0) + 1
                 db["channels"][cid]["alert_count"] = ch.get("alert_count", 0) + 1
                 new_alerts.append((video, signal))
@@ -214,7 +264,6 @@ def run_scan(db, quiet=False):
 
         time.sleep(0.4)   # be gentle with the API
 
-    db["seen_alerts"] = db["seen_alerts"][-500:]
     db["scans"]       = db.get("scans", 0) + 1
     db["last_scan"]   = datetime.now().isoformat()
     save_db(db)
