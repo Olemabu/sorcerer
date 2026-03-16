@@ -151,15 +151,10 @@ def run_scan(db, quiet=False):
                 comments = fetch_comments(video["id"], YT_KEY)
                 intel    = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
 
-                deliver(
-                    video, signal, baseline, intel,
-                    TG_TOKEN, TG_CHAT,
-                    log_fn=log_plain,
-                )
-
-                # Generate full shoot-ready script
+                # Generate full production package first
+                script = None
                 if ANTHROPIC_KEY and intel and not intel.get("_error"):
-                    log("  ✍  Generating shoot-ready script...")
+                    log("  ✍  Generating full production package...")
                     script   = generate_script(video, signal, baseline, comments, intel, ANTHROPIC_KEY)
                     script_f = save_script_file(script, video, str(DATA_DIR))
                     if script_f:
@@ -167,6 +162,14 @@ def run_scan(db, quiet=False):
                         log_plain(format_script_terminal(script))
                     else:
                         log("  ⚠  Script generation failed")
+
+                # Deliver signal + production package to Telegram
+                deliver(
+                    video, signal, baseline, intel,
+                    TG_TOKEN, TG_CHAT,
+                    log_fn=log_plain,
+                    script=script,
+                )
 
                 db["seen_alerts"].append(key)
                 db["total_alerts"] = db.get("total_alerts", 0) + 1
