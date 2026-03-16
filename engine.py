@@ -121,19 +121,24 @@ def fetch_videos(channel_id, api_key, max_results=30):
         views  = int(item["statistics"].get("viewCount", 0))
         dur    = parse_iso_duration(item["contentDetails"].get("duration", "PT0S"))
 
+        likes    = int(item["statistics"].get("likeCount", 0))
+        comments = int(item["statistics"].get("commentCount", 0))
+        eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
+
         videos.append({
-            "id":             item["id"],
-            "title":          item["snippet"]["title"],
-            "published":      pub,
-            "age_hours":      round(age_h, 1),
-            "views":          views,
-            "likes":          int(item["statistics"].get("likeCount", 0)),
-            "comment_count":  int(item["statistics"].get("commentCount", 0)),
-            "views_per_hour": round(views / max(age_h, 0.5), 1),
-            "duration_mins":  dur,
-            "channel_id":     channel_id,
-            "channel_title":  item["snippet"]["channelTitle"],
-            "thumbnail":      item["snippet"]["thumbnails"].get("high", {}).get("url", ""),
+            "id":              item["id"],
+            "title":           item["snippet"]["title"],
+            "published":       pub,
+            "age_hours":       round(age_h, 1),
+            "views":           views,
+            "likes":           likes,
+            "comment_count":   comments,
+            "views_per_hour":  round(views / max(age_h, 0.5), 1),
+            "engagement_rate": eng_rate,
+            "duration_mins":   dur,
+            "channel_id":      channel_id,
+            "channel_title":   item["snippet"]["channelTitle"],
+            "thumbnail":       item["snippet"]["thumbnails"].get("high", {}).get("url", ""),
         })
 
     return sorted(videos, key=lambda v: v["published"], reverse=True), subs
@@ -174,8 +179,9 @@ def build_baseline(videos, n=BASELINE_WINDOW):
     if len(pool) < 3:
         return None
 
-    rates     = [v["views_per_hour"] for v in pool]
-    durations = [v["duration_mins"]  for v in pool if v["duration_mins"] > 0]
+    rates       = [v["views_per_hour"]  for v in pool]
+    durations   = [v["duration_mins"]   for v in pool if v["duration_mins"] > 0]
+    eng_rates   = [v.get("engagement_rate", 0) for v in pool if v.get("engagement_rate", 0) > 0]
 
     # Early-life velocity: what does a "normal" video look like in its first 12h?
     # We approximate by looking at videos that are now mature — their views_per_hour
@@ -189,24 +195,34 @@ def build_baseline(videos, n=BASELINE_WINDOW):
         "mean_vph":        round(statistics.mean(rates), 1),
         "stdev_vph":       round(statistics.stdev(rates) if len(rates) > 1 else 0, 1),
         "median_duration": round(statistics.median(durations), 0) if durations else 0,
+        "median_eng_rate": round(statistics.median(eng_rates), 2) if eng_rates else 0,
         "sample_size":     len(pool),
         "early_vph":       round(statistics.median(early_rates), 1),
     }
 
 
 # ── Signal detection ─────────────────────────────────────────────────────────
+# Engagement boost: if a video's engagement rate is 2×+ the channel average,
+# it gets promoted one tier. This catches "sleeper" videos where the audience
+# is going crazy in comments/likes but views haven't exploded yet.
+ENGAGEMENT_BOOST_MULT = float(os.getenv("ENGAGEMENT_BOOST_MULT", "2.0"))
+
+
 def classify(video, baseline):
     """
-    Pure math. No AI. Three tiers + velocity detection.
+    Pure math. No AI. Three tiers + velocity detection + engagement boost.
 
     Tiers (based on views/hr vs channel baseline):
       VIRAL   — 5.0× or higher (configurable)
       RISING  — 2.5× or higher
-      WARMING — 1.5× or higher (new — early warning, no script generated)
+      WARMING — 1.5× or higher (early warning, no script generated)
+
+    Engagement boost:
+      If engagement_rate >= 2× channel median, promote one tier:
+      WARMING → RISING, RISING → VIRAL
 
     Velocity (based on acceleration in first 12h):
       ACCELERATING — video is very young and gaining pace unusually fast
-                     for this channel, even before hitting a multiplier
 
     Returns signal dict or None.
     """
@@ -215,6 +231,13 @@ def classify(video, baseline):
 
     mult = video["views_per_hour"] / baseline["median_vph"]
 
+    # Check engagement boost eligibility
+    eng_boosted = False
+    median_eng  = baseline.get("median_eng_rate", 0)
+    video_eng   = video.get("engagement_rate", 0)
+    if median_eng > 0 and video_eng >= median_eng * ENGAGEMENT_BOOST_MULT:
+        eng_boosted = True
+
     # ── Tier 1: VIRAL ──
     if mult >= VIRAL_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
         return {
@@ -222,24 +245,43 @@ def classify(video, baseline):
             "emoji":      "🔥",
             "multiplier": round(mult, 1),
             "window":     "48h",
+            "engagement_boost": False,
         }
 
-    # ── Tier 2: RISING ──
+    # ── Tier 2: RISING (or VIRAL if engagement-boosted) ──
     if mult >= RISING_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
+        if eng_boosted:
+            return {
+                "level":      "VIRAL",
+                "emoji":      "🔥",
+                "multiplier": round(mult, 1),
+                "window":     "48h",
+                "engagement_boost": True,
+            }
         return {
             "level":      "RISING",
             "emoji":      "⚡",
             "multiplier": round(mult, 1),
             "window":     "72h",
+            "engagement_boost": False,
         }
 
-    # ── Tier 3: WARMING (new — lightweight alert, no AI calls) ──
+    # ── Tier 3: WARMING (or RISING if engagement-boosted) ──
     if mult >= WARMING_MULTIPLIER and video["age_hours"] <= MAX_AGE_HOURS:
+        if eng_boosted:
+            return {
+                "level":      "RISING",
+                "emoji":      "⚡",
+                "multiplier": round(mult, 1),
+                "window":     "72h",
+                "engagement_boost": True,
+            }
         return {
             "level":      "WARMING",
             "emoji":      "📈",
             "multiplier": round(mult, 1),
             "window":     "96h",
+            "engagement_boost": False,
         }
 
     # ── Velocity detection: young video accelerating fast ──
@@ -256,6 +298,7 @@ def classify(video, baseline):
                     "emoji":      "🚀",
                     "multiplier": round(velocity_mult, 1),
                     "window":     "12h",
+                    "engagement_boost": False,
                 }
 
     return None

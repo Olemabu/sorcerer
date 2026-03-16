@@ -46,6 +46,11 @@ ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 TG_TOKEN      = os.getenv("TELEGRAM_TOKEN", "")
 TG_CHAT       = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# SCAN_ONLY mode: set to "true" when credits are low.
+# Radar still detects all signals and sends Telegram alerts with video data,
+# but skips ALL Claude API calls (intelligence, script, director). $0 cost.
+SCAN_ONLY = os.getenv("SCAN_ONLY", "false").lower() == "true"
+
 SCAN_INTERVAL_HOURS = int(os.getenv("SCAN_INTERVAL_HOURS", "2"))
 
 BASE_DIR = Path(__file__).parent
@@ -126,7 +131,12 @@ def run_scan(db, quiet=False):
     tracker.reset_session()
 
     if not quiet:
-        intel_status = "ON ✓" if ANTHROPIC_KEY else "OFF (add ANTHROPIC_API_KEY to enable)"
+        if SCAN_ONLY:
+            intel_status = "SCAN ONLY (no AI — $0 mode)"
+        elif ANTHROPIC_KEY:
+            intel_status = "ON ✓"
+        else:
+            intel_status = "OFF (add ANTHROPIC_API_KEY to enable)"
         log(f"SCAN START — {len(channels)} channels — intelligence {intel_status}")
 
     new_alerts = []
@@ -202,7 +212,41 @@ def run_scan(db, quiet=False):
                     found += 1
                     continue
 
-                # ── Full tiers: RISING / VIRAL — fire the whole pipeline ──
+                # ── Full tiers: RISING / VIRAL ──
+
+                # SCAN_ONLY mode: send data-only alert, skip all Claude calls ($0)
+                if SCAN_ONLY or not ANTHROPIC_KEY:
+                    if TG_TOKEN and TG_CHAT:
+                        from alerts import send_telegram
+                        boost_tag = " 📊 ENGAGEMENT BOOSTED" if signal.get("engagement_boost") else ""
+                        scan_msg = (
+                            f"{signal['emoji']} <b>{signal['level']} SIGNAL</b>{boost_tag}\n\n"
+                            f"<b>{video['title']}</b>\n"
+                            f"Channel: {video['channel_title']}\n\n"
+                            f"📊 <b>Data</b>\n"
+                            f"Views: {video['views']:,} in {video['age_hours']:.0f}h\n"
+                            f"Pace: {video['views_per_hour']:,.0f} views/hr "
+                            f"({signal['multiplier']}× baseline)\n"
+                            f"Likes: {video['likes']:,}\n"
+                            f"Comments: {video['comment_count']:,}\n"
+                            f"Engagement: {video.get('engagement_rate', 0):.1f}% "
+                            f"(channel avg: {baseline.get('median_eng_rate', 0):.1f}%)\n"
+                            f"Window: {signal['window']}\n\n"
+                            f"<i>SCAN ONLY mode — AI pipeline off. "
+                            f"Set SCAN_ONLY=false and top up credits to get full scripts.</i>\n\n"
+                            f"<a href='https://youtube.com/watch?v={video['id']}'>Watch →</a>"
+                        )
+                        send_telegram(scan_msg, TG_TOKEN, TG_CHAT)
+                    log(f"  → {signal['level']} alert sent (scan-only, $0)")
+
+                    db["seen_alerts"][key] = datetime.now().isoformat()
+                    db["total_alerts"] = db.get("total_alerts", 0) + 1
+                    db["channels"][cid]["alert_count"] = ch.get("alert_count", 0) + 1
+                    new_alerts.append((video, signal))
+                    found += 1
+                    continue
+
+                # ── Full AI pipeline (credits available) ──
                 comments = fetch_comments(video["id"], YT_KEY)
                 intel    = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
 
@@ -514,12 +558,13 @@ def cmd_daemon(args):
     """
     interval_secs = SCAN_INTERVAL_HOURS * 3600
 
+    _intel_str = 'SCAN ONLY ($0)' if SCAN_ONLY else ('ON ✓' if ANTHROPIC_KEY else 'OFF')
     print(f"""
   ╔══════════════════════════════════════════╗
   ║  SORCERER DAEMON — RUNNING               ║
   ║  Scan interval : every {SCAN_INTERVAL_HOURS}h                   ║
   ║  Channels      : {len(load_db().get('channels', {})):<24}║
-  ║  Intelligence  : {'ON ✓' if ANTHROPIC_KEY else 'OFF':<24}║
+  ║  Intelligence  : {_intel_str:<24}║
   ║  Telegram      : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
   ║  Bot control   : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
   ╚══════════════════════════════════════════╝
