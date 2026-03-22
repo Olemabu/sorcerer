@@ -167,14 +167,42 @@ class SorcererBot:
 
     def _run_scan(self, chat_id):
         try:
-            results = self.scan_fn()
-            if results == 0:
-                self.send("✅ Scan complete — all quiet. No new signals.", chat_id)
-            else:
-                self.send(f"🔥 Scan complete — {results} new signal(s) detected! Check above.", chat_id)
-        except Exception as e:
-            self.send(f"⚠ Scan error: {e}", chat_id)
+            db = self.load_db()
+            channels = db.get("channels", {})
 
+            if not channels:
+                self.send(
+                    "No channels on radar yet.\n\n"
+                    "Use /add @channel or /setup to load a niche preset first.",
+                    chat_id
+                )
+                return
+
+            no_baseline = [ch["title"] for ch in channels.values() if not ch.get("baseline")]
+
+            results = self.scan_fn()
+
+            if results and results > 0:
+                self.send(f"Scan complete -- {results} new signal(s) detected! Check above.", chat_id)
+            elif no_baseline:
+                names = "\n".join(f"  - {t}" for t in no_baseline[:8])
+                extra = "\n  ..." if len(no_baseline) > 8 else ""
+                self.send(
+                    f"Scan complete -- {len(no_baseline)} channel(s) still building baseline\n"
+                    "(need 3+ videos older than 48h).\n"
+                    + names + extra +
+                    "\n\nSignals will fire once baselines are ready. Run /scan again soon.",
+                    chat_id
+                )
+            else:
+                self.send(
+                    "Scan complete -- no new signals right now.\n\n"
+                    "All channels are below thresholds. "
+                    "You will be alerted the moment something spikes.",
+                    chat_id
+                )
+        except Exception as e:
+            self.send(f"Scan error: {e}", chat_id)
     def handle_watch(self, chat_id, args):
         if not args:
             self.send(
@@ -533,7 +561,13 @@ class SorcererBot:
             "/ai_tech":     lambda: self.handle_setup(chat_id, ["ai_tech"]),
             "/ai_healthcare": lambda: self.handle_setup(chat_id, ["ai_healthcare"]),
             "/ai_innovation": lambda: self.handle_setup(chat_id, ["ai_innovation"]),
-            "/full":        lambda: self.handle_setup(chat_id, ["full"]),
+            "/ai":             lambda: self.handle_setup(chat_id, ["ai"]),
+            "/innovation":     lambda: self.handle_setup(chat_id, ["innovation"]),
+            "/tech":           lambda: self.handle_setup(chat_id, ["tech"]),
+            "/invention":      lambda: self.handle_setup(chat_id, ["invention"]),
+            "/hi_weapons":     lambda: self.handle_setup(chat_id, ["hi_weapons"]),
+            "/money":          lambda: self.handle_setup(chat_id, ["money"]),
+            "/full":           lambda: self.handle_setup(chat_id, ["full"]),
             "/direct":         lambda: self.handle_direct(chat_id, args),
             "/scorsese":       lambda: self.handle_direct(chat_id, ["scorsese"]),
             "/mrbeast":        lambda: self.handle_direct(chat_id, ["mrbeast"]),
