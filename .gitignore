@@ -1,1 +1,16 @@
 .env
+node_modules/
+vertical_demo_output/
+*.exe
+videos/
+*.mp4
+*.mp3
+*.wav
+*.onnx
+*.pt
+*.pth
+sorcerer_assets/
+scripts/
+sorcerer_db.json
+approval_queue.json
+sorcerer_log.txt
