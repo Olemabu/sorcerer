@@ -291,18 +291,19 @@ NICHES = {
 }
 
 
+
 def get_niche(niche_key):
-        return NICHES.get(niche_key)
+    return NICHES.get(niche_key)
 
 
 def list_niches():
-        lines = []
-        for key, niche in NICHES.items():
-                    lines.append(
-                                    f"/{key}\n"
-                                    f"  {niche['name']}\n"
-                                    f"  {niche['description']}\n"
-                                    f"  CPM: {niche['cpm_range']}\n"
-                                    f"  {len(niche['channels'])} channels · {len(niche['trend_keywords'])} keywords"
-                    )
-                return "\n\n".join(lines)
+    lines = []
+    for key, niche in NICHES.items():
+        lines.append(
+            f"/{key}\n"
+            f"  {niche['name']}\n"
+            f"  {niche['description']}\n"
+            f"  CPM: {niche['cpm_range']}\n"
+            f"  {len(niche['channels'])} channels · {len(niche['trend_keywords'])} keywords"
+        )
+    return "\n\n".join(lines)
