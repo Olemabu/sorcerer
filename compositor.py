@@ -329,18 +329,94 @@ def _apply_text_overlays(input_path, overlays, style, output_path, log_fn):
 
 
 # ── Master compositor ───────────────────────────────────────────────────────
+def mix_audio_layers(video_path, narration_path, soundtrack_path, sfx_data,
+                     style, output_path, log_fn=print):
+    """
+    Unified audio mixer for narration, background music, and spot SFX.
+    """
+    music_cfg = style.get("music", {})
+    duck      = music_cfg.get("duck_level_db", -18)
+
+    # 1. Build inputs
+    # Input 0:v = video, 0:a = narration (or whatever is in the video file)
+    inputs = ["-i", str(video_path)]
+
+    # If narration_path is provided separately (common in Remotion path), we map it
+    # But usually, video_path already has the narration baked in for FFmpeg path.
+    # To keep it generic, let's assume video_path has the narration at 0:a.
+
+    if soundtrack_path and Path(soundtrack_path).exists():
+        inputs += ["-i", str(soundtrack_path)]
+
+    sfx_start_idx = 2 if (soundtrack_path and Path(soundtrack_path).exists()) else 1
+
+    valid_sfx = []
+    if sfx_data:
+        for sfx in sfx_data:
+            if Path(sfx["path"]).exists():
+                inputs += ["-i", sfx["path"]]
+                valid_sfx.append(sfx)
+
+    # 2. Build filter complex
+    filter_parts = []
+    amix_inputs  = 1 # Primary narration (0:a)
+    
+    # Soundtrack
+    if soundtrack_path and Path(soundtrack_path).exists():
+        filter_parts.append(f"[1:a]volume={duck}dB[music]")
+        amix_inputs += 1
+        music_label = "[music]"
+    else:
+        music_label = ""
+
+    # Spot SFX
+    sfx_labels = []
+    for i, sfx in enumerate(valid_sfx):
+        # Convert "MM:SS" or "SS.ms" to milliseconds
+        ts = sfx["timestamp"]
+        if ":" in ts:
+            parts = ts.split(":")
+            ms = (int(parts[0]) * 60 + int(parts[1])) * 1000
+        else:
+            ms = int(float(ts) * 1000)
+        
+        label = f"[sfx{i}]"
+        # adelay=ms|ms is for stereo. If we want to be safe, we can use adelay={ms}:all=1
+        filter_parts.append(f"[{sfx_start_idx + i}:a]adelay={ms}|{ms}[sfx_raw{i}]")
+        # Optional: Add a small volume boost/cut for SFX if needed
+        filter_parts.append(f"[sfx_raw{i}]volume=1.0{label}")
+        sfx_labels.append(label)
+        amix_inputs += 1
+
+    # 3. Final Mix
+    if amix_inputs > 1:
+        log_fn(f"  🎵 Mixing soundtrack + {len(sfx_labels)} SFX...")
+        mix_str = "[0:a]" + music_label + "".join(sfx_labels)
+        # dropout_transition=0.5 for cleaner cuts in short clips
+        filter_parts.append(f"{mix_str}amix=inputs={amix_inputs}:duration=first:dropout_transition=0.5[outa]")
+        
+        ok = ffmpeg(
+            *inputs,
+            "-filter_complex", ";".join(filter_parts),
+            "-map", "0:v",
+            "-map", "[outa]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            str(output_path),
+            timeout=600, log_fn=log_fn,
+        )
+    else:
+        shutil.copy(str(video_path), str(output_path))
+        ok = True
+
+    return ok
+
+
 def composite_full_video(narration_data, footage_map, soundtrack_path,
-                          style, output_dir, log_fn=print):
+                          style, output_dir, sfx_data=None, log_fn=print):
     """
     Composite the complete documentary from all sections.
-
-    narration_data : output from narrator.narrate_full_script()
-    footage_map    : output from visual_director.fetch_all_footage()
-    soundtrack_path: path to the Suno-generated music MP3
-    style          : loaded style JSON dict
-    output_dir     : where to save the final video
-
-    Returns path to the finished MP4.
     """
     work_dir = Path(output_dir) / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -399,32 +475,17 @@ def composite_full_video(narration_data, footage_map, soundtrack_path,
         log_fn("  ❌ Concatenation failed")
         return None
 
-    # Mix in soundtrack
+    # Mix in soundtrack and SFX using unified mixer
     final_path = Path(output_dir) / "final_video.mp4"
-
-    if soundtrack_path and Path(soundtrack_path).exists():
-        log_fn("  🎵 Mixing soundtrack...")
-        music = style.get("music", {})
-        duck  = music.get("duck_level_db", -18)
-        full  = music.get("full_level_db", -8)
-
-        ok = ffmpeg(
-            "-i", str(raw_video),
-            "-i", soundtrack_path,
-            "-filter_complex",
-            f"[1:a]volume={duck}dB[music];"
-            f"[0:a][music]amix=inputs=2:duration=first:weights=1 0.4[outa]",
-            "-map", "0:v",
-            "-map", "[outa]",
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            str(final_path),
-            timeout=600, log_fn=log_fn,
-        )
-    else:
-        shutil.copy(str(raw_video), str(final_path))
-        ok = True
+    ok = mix_audio_layers(
+        video_path=raw_video,
+        narration_path=None, # Already in raw_video narration track
+        soundtrack_path=soundtrack_path,
+        sfx_data=sfx_data,
+        style=style,
+        output_path=final_path,
+        log_fn=log_fn
+    )
 
     if ok and final_path.exists():
         size_mb = final_path.stat().st_size / (1024 * 1024)

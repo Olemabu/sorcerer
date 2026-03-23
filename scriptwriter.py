@@ -62,7 +62,7 @@ def sanitise_script(text):
     return text
 
 
-def generate_script(video, signal, baseline, comments, intel, anthropic_key):
+def generate_script(video, signal, baseline, comments, intel, anthropic_key, is_exact_text=False):
     if not anthropic_key:
         return None
 
@@ -81,7 +81,60 @@ def generate_script(video, signal, baseline, comments, intel, anthropic_key):
     struct_block = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(structure))
     audience_str = ", ".join(audience)
 
-    prompt = f"""You are the head writer for the most watched AI and healthcare documentary channel on YouTube.
+    if is_exact_text:
+        source_text = video["title"]
+        prompt = f"""You are a documentary film director and editor.
+
+The user has provided the EXACT TEXT they want as the narration for a video.
+CRITICAL: DO NOT REWRITE, SUMMARIZE, OR OMIT ANY PART OF THE TEXT. 
+You must use their EXACT text word-for-word as the `narration` field in your JSON output.
+
+Your job is ONLY to:
+1. Break the text into logical `sections` (every 100-200 words).
+2. The TOTAL aggregation of all `narration` fields in your sections MUST EXACTLY MATCH THE PROVIDED TEXT. 
+3. Add visual direction, b-roll keywords, and metadata (titles, thumbnail ideas, etc).
+4. Do NOT add any extra narration or commentary of your own.
+
+EXACT NARRATION TEXT PROVIDED:
+{source_text}
+
+THE FULL CONTENT PLAN:
+Return ONLY valid JSON. No markdown. No text outside the JSON.
+
+{{
+  "title": "A compelling title based on the text",
+  "title_alternatives": ["Alt 1", "Alt 2", "Alt 3"],
+  "thumbnail": {{
+    "background": "Exact color and style",
+    "main_image": "What to show — be specific",
+    "text_overlay": "Max 4 words. Huge. Shocking.",
+    "face_expression": "Exact expression if face shown",
+    "color_scheme": "Exact colors",
+    "mobile_test": "Will this work as a tiny square on a phone? Yes/No and why"
+  }},
+  "seo_tags": ["tag1","tag2"],
+  "description_hook": "First 2 lines",
+  "estimated_runtime_mins": {max(1, len(source_text.split()) // 150)},
+  "funniest_line": "The best line",
+  "hook_score": "Rate the hook 1-10",
+  "sections": [
+    {{
+      "name": "SECTION NAME",
+      "timestamp": "0:00",
+      "duration_secs": 45,
+      "mrbeast_energy": "Pacing note",
+      "visual_treatment": "Visual style for this section",
+      "pain_addressed": "Fear or desire",
+      "narration": "EXACT TEXT SEGMENT HERE — DO NOT REWRITE. WEAVE IN [VISUAL CUE: description] IF NEEDED.",
+      "funny_moment": null,
+      "open_loop": "Tension created",
+      "broll_keywords": ["keyword1", "keyword2", "keyword3"],
+      "conversion_note": "Note"
+    }}
+  ]
+}}"""
+    else:
+        prompt = f"""You are the head writer for the most watched AI and healthcare documentary channel on YouTube.
 
 Your channel sits at the intersection of:
 - Breaking AI and tech news

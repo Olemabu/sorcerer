@@ -8,7 +8,7 @@ creative decision a human director would make —
 but in seconds, with perfect consistency, and with
 deep knowledge of what makes content go viral.
 
-14 Intelligence Features:
+15 Intelligence Features:
   1.  Audience Emotion Tracker
   2.  Cultural Context Engine
   3.  Viral Moment Predictor
@@ -23,6 +23,7 @@ deep knowledge of what makes content go viral.
   12. Replayability Score
   13. Revenue Optimiser
   14. Monetisation Mode
+  15. Cinematic Depth (3D) — NEW: Designs z-axis depth and 3D rotations.
 
 One Claude Opus call. Complete visual direction document.
 Cost: ~$0.15 per video directed.
@@ -107,7 +108,8 @@ CULTURAL_COLOUR_MAP = {
 
 # ── Main director function ─────────────────────────────────────────────────────
 def direct(script, style="hybrid", target_culture="global",
-           channel_history=None, anthropic_key=None, log_fn=print):
+           aspect_ratio="16:9", channel_history=None, 
+           anthropic_key=None, log_fn=print):
     """
     The AI Director reads the full script and produces a complete
     visual direction document.
@@ -193,6 +195,9 @@ Pacing philosophy: {style_config['pacing_philosophy']}
 TARGET CULTURE: {target_culture}
 Colour meanings for this culture: {json.dumps(colour_culture)}
 
+ASPECT RATIO: {aspect_ratio}
+(Optimization note: Adjust visual framing and 3D perspectives to suit this specific format)
+
 {memory_block}
 
 ━━ YOUR 14 DIRECTORIAL DECISIONS ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -210,7 +215,13 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
       "mood": "single word mood label",
       "character_archetype": "victim/hero/villain/oracle/everyman/trickster",
       "intensity": 1-10,
-      "timestamp_range": "0:00 - 1:30"
+      "timestamp_range": "0:00 - 1:30",
+      "cinematic_3d_direction": {{
+        "perspective": "low_angle/high_angle/tilted/dutch_angle",
+        "z_movement": "push_in/pull_out/static",
+        "depth_focus": "shallow/deep",
+        "spatial_reasoning": "why this 3D perspective for this emotional climax"
+      }}
     }}
   ],
 
@@ -251,8 +262,10 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
         "cluster_id": 1,
         "font": "font choice",
         "size": "large/medium/small",
-        "animation": "slam/fade/typewrite/float/none",
+        "animation": "slam/fade/typewrite/float/none/3d_spin/3d_flip",
         "colour": "#hexcode",
+        "z_depth": "-500 to 500",
+        "rotation_y": "-45 to 45",
         "reasoning": "why this for this emotional moment"
       }}
     ]
@@ -437,6 +450,117 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
         return {"_error": f"JSON parse failed: {e}", "_raw": raw[:500]}
     except Exception as e:
         return {"_error": str(e)}
+
+
+def vet_direction(script, direction, anthropic_key, log_fn=print):
+    """
+    Acts as a 'Cynical Executive Producer' to find flaws in the direction doc.
+    """
+    if not anthropic_key or not direction or direction.get("_error"):
+        return None
+
+    log_fn("  🧐 Vetting production plan (Executive Producer loop)...")
+
+    prompt = f"""You are a Cynical Executive Producer with 40 years of experience in high-end documentary filmmaking and viral YouTube production.
+You have been handed a Visual Direction document for a project. Your job is to find the weak points, the logical gaps, and the "hallucinations" before we spend any money on production.
+
+━━ THE SCRIPT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{json.dumps(script, indent=2)[:5000]}
+
+━━ THE PROPOSED DIRECTION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{json.dumps(direction, indent=2)[:8000]}
+
+━━ YOUR QUALITY CHECKLIST ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Hallucinations: Does it suggest SFX or visuals that don't match the script?
+2. Colour Narrative: Does the journey actually make sense for the emotion, or is it just random?
+3. Viral Moment: Is the selected line actually a hook, or just filler?
+4. Technical Pacing: Are timestamps consistent? Are SFX properly spaced?
+5. Character Archetypes: Do they match the narration's tone?
+
+Return a JSON report with your critiques.
+
+Return ONLY valid JSON:
+{{
+  "overall_quality": 1-10,
+  "lethal_flaws": ["critical issues that will ruin the video"],
+  "minor_annoyances": ["small polish points"],
+  "suggested_fixes": [
+    {{
+      "field": "section name or path to the value in the direction JSON",
+      "issue": "what is wrong",
+      "fix": "exact replacement value or instruction"
+    }}
+  ]
+}}"""
+
+    try:
+        r = requests.post(
+            ANTHROPIC_URL,
+            headers={
+                "x-api-key":         anthropic_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={
+                "model":      CLAUDE_MODEL,
+                "max_tokens": 4000,
+                "messages":   [{"role": "user", "content": prompt}],
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        raw = r.json()["content"][0]["text"].strip()
+        raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(raw)
+    except Exception as e:
+        log_fn(f"  ⚠ Vetting failed: {e}")
+        return None
+
+
+def apply_fixes(direction, vetting_report, anthropic_key, log_fn=print):
+    """
+    Applies the EP's suggested fixes to the direction document.
+    """
+    if not vetting_report or not vetting_report.get("suggested_fixes"):
+        return direction
+
+    log_fn(f"  🛠 Applying {len(vetting_report['suggested_fixes'])} corrections from the EP...")
+
+    prompt = f"""You are a Lead Editor. You have an original Direction document and an Executive Producer's Vetting Report.
+Your job is to produce the FINAL, perfect version of the Direction document by applying the EP's fixes.
+
+━━ ORIGINAL DIRECTION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{json.dumps(direction, indent=2)[:8000]}
+
+━━ VETTING REPORT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{json.dumps(vetting_report, indent=2)}
+
+Return ONLY the complete, final JSON direction document. No text outside JSON. No explanation."""
+
+    try:
+        r = requests.post(
+            ANTHROPIC_URL,
+            headers={
+                "x-api-key":         anthropic_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={
+                "model":      CLAUDE_MODEL,
+                "max_tokens": 12000,
+                "messages":   [{"role": "user", "content": prompt}],
+            },
+            timeout=90,
+        )
+        r.raise_for_status()
+        raw = r.json()["content"][0]["text"].strip()
+        raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+        final_dir = json.loads(raw)
+        final_dir["vetted"] = True
+        return final_dir
+    except Exception as e:
+        log_fn(f"  ⚠ Fix application failed: {e}")
+        return direction
 
 
 # ── Fallback when no API key ───────────────────────────────────────────────────

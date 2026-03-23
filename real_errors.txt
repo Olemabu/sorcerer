@@ -1,0 +1,77 @@
+.\approval.py:18:1: F401 'os' imported but unused
+.\approval.py:20:1: F401 'threading' imported but unused
+.\approval.py:98:9: F841 local variable 'script' is assigned to but never used
+.\board_animator.py:28:1: F401 'os' imported but unused
+.\board_animator.py:31:1: F401 'datetime.datetime' imported but unused
+.\board_animator.py:148:5: F841 local variable 'light_moods' is assigned to but never used
+.\board_animator.py:371:5: F841 local variable 'png_cast' is assigned to but never used
+.\board_animator.py:372:5: F841 local variable 'unique' is assigned to but never used
+.\board_animator.py:486:5: F841 local variable 'has_audio' is assigned to but never used
+.\bot.py:18:1: F401 'os' imported but unused
+.\bot.py:256:9: F401 'presets.list_niches' imported but unused
+.\bot.py:306:13: F402 import 'time' from line 20 shadowed by loop variable
+.\bot.py:364:9: F811 redefinition of unused 'os' from line 18
+.\bot.py:414:9: F401 'os' imported but unused
+.\bot.py:414:9: F811 redefinition of unused 'os' from line 18
+.\bot.py:430:13: F401 'os' imported but unused
+.\bot.py:430:13: F811 redefinition of unused 'os' from line 18
+.\bot.py:508:13: F402 import 'time' from line 20 shadowed by loop variable
+.\bot.py:513:9: F401 'os' imported but unused
+.\bot.py:513:9: F811 redefinition of unused 'os' from line 18
+.\bot.py:567:13: F811 redefinition of unused 'os' from line 18
+.\bot.py:685:13: F811 redefinition of unused 'os' from line 18
+.\bot.py:686:13: F401 'pathlib.Path' imported but unused
+.\compositor.py:27:1: F401 'json' imported but unused
+.\compositor.py:145:5: F841 local variable 'accent' is assigned to but never used
+.\compositor.py:146:5: F841 local variable 'font' is assigned to but never used
+.\compositor.py:298:5: F841 local variable 'typo' is assigned to but never used
+.\compositor.py:300:5: F841 local variable 'accent' is assigned to but never used
+.\compositor.py:409:9: F841 local variable 'full' is assigned to but never used
+.\downloader.py:11:1: F401 'os' imported but unused
+.\engine.py:9:1: F401 'time' imported but unused
+.\extracted_files\bot.py:18:1: F401 'os' imported but unused
+.\extracted_files\sorcerer.py:27:5: F401 'requests' imported but unused
+.\extracted_files\sorcerer.py:38:1: F401 'alerts.format_terminal' imported but unused
+.\extracted_files\sorcerer.py:38:1: F401 'alerts.format_telegram' imported but unused
+.\extracted_files\sorcerer.py:376:9: F401 'engine.build_baseline' imported but unused
+.\extracted_files\sorcerer.py:568:5: F811 redefinition of unused 'format_terminal' from line 38
+.\extracted_files\sorcerer.py:574:13: F811 redefinition of unused 'format_telegram' from line 38
+.\extracted_files\trends.py:22:1: F401 'datetime.timedelta' imported but unused
+.\intelligence.py:14:1: F401 'json' imported but unused
+.\intelligence.py:15:1: F401 'requests' imported but unused
+.\pipeline.py:23:1: F401 'json' imported but unused
+.\pipeline.py:24:1: F401 'time' imported but unused
+.\pipeline.py:230:5: F811 redefinition of unused 'json' from line 23
+.\publisher\__init__.py:25:1: F401 'pathlib.Path' imported but unused
+.\publisher\__init__.py:26:1: F401 'datetime.datetime' imported but unused
+.\publisher\__init__.py:202:13: F811 redefinition of unused 'post_to_group' from line 168
+.\publisher\captions.py:37:5: F841 local variable 'cta' is assigned to but never used
+.\publisher\captions.py:128:5: F841 local variable 'e' is assigned to but never used
+.\publisher\captions.py:130:5: F841 local variable 'e' is assigned to but never used
+.\publisher\clipper.py:21:1: F401 'os' imported but unused
+.\publisher\clipper.py:50:5: F841 local variable 'pain_map' is assigned to but never used
+.\publisher\facebook.py:22:1: F401 'time' imported but unused
+.\publisher\telegram.py:164:5: F841 local variable 'tg_caps' is assigned to but never used
+.\publisher\twitter.py:32:1: F401 'json' imported but unused
+.\publisher\twitter.py:53:9: F401 'requests_oauthlib.OAuth1' imported but unused
+.\publisher\twitter.py:119:9: F841 local variable 't3_id' is assigned to but never used
+.\publisher\youtube.py:11:1: F401 'os' imported but unused
+.\publisher\youtube.py:12:1: F401 'json' imported but unused
+.\publisher\youtube.py:13:1: F401 'time' imported but unused
+.\scriptwriter.py:13:1: F401 'json' imported but unused
+.\scriptwriter.py:16:1: F401 'requests' imported but unused
+.\scriptwriter.py:18:1: F401 'pathlib.Path' imported but unused
+.\scriptwriter.py:75:5: F841 local variable 'hook' is assigned to but never used
+.\scriptwriter.py:595:5: F811 redefinition of unused 'Path' from line 18
+.\sorcerer.py:27:5: F401 'requests' imported but unused
+.\sorcerer.py:38:1: F401 'alerts.format_terminal' imported but unused
+.\sorcerer.py:38:1: F401 'alerts.format_telegram' imported but unused
+.\sorcerer.py:510:9: F401 'engine.build_baseline' imported but unused
+.\sorcerer.py:703:5: F811 redefinition of unused 'format_terminal' from line 38
+.\sorcerer.py:709:13: F811 redefinition of unused 'format_telegram' from line 38
+.\soundtrack.py:15:1: F401 'time' imported but unused
+.\test_edge_tts.py:4:1: F401 'locale' imported but unused
+.\thumbnailer.py:9:1: F401 'os' imported but unused
+.\thumbnailer.py:19:5: F841 local variable 'out_path' is assigned to but never used
+.\tiktok.py:24:1: F401 'json' imported but unused
+.\trends.py:22:1: F401 'datetime.timedelta' imported but unused

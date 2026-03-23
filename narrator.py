@@ -1,10 +1,10 @@
 """
 SORCERER — Narrator
 ====================
-Converts script narration to audio using ElevenLabs.
+Converts script narration to audio using Microsoft Edge TTS.
 
 Features:
-  - Uses your cloned voice (set ELEVENLABS_VOICE_ID in .env)
+  - Uses Edge TTS natural voices (Free, no API key required)
   - Renders each script section separately for precise timing
   - Handles [PAUSE] markers by inserting silence
   - Strips visual cue markers before sending to TTS
@@ -12,37 +12,18 @@ Features:
   - Returns per-section audio files + timing data for compositor
 
 Setup:
-  1. Sign up at elevenlabs.io
-  2. Go to Voices → Add Voice → Instant Clone
-  3. Upload 3+ minutes of clean audio of yourself speaking
-  4. Copy the Voice ID
-  5. Add to .env: ELEVENLABS_VOICE_ID=your_voice_id_here
-     ELEVENLABS_API_KEY=your_api_key_here
-
-Recommended model: eleven_turbo_v2_5 (fastest, cheapest, excellent quality)
-Cost: ~$0.05 per 15-minute video on Creator plan ($22/mo flat)
+  1. No setup required! `edge-tts` python package is completely free.
+  2. Set EDGE_TTS_VOICE=en-US-ChristopherNeural in .env to choose voice.
 """
 
 import os
 import re
-import json
 import time
-import requests
 from pathlib import Path
 
-ELEVENLABS_API = "https://api.elevenlabs.io/v1"
+# Best models for documentary narration
+DEFAULT_VOICE   = "en-US-ChristopherNeural"
 
-# Best model for documentary narration — natural, authoritative
-DEFAULT_MODEL   = "eleven_turbo_v2_5"
-DEFAULT_VOICE   = "21m00Tcm4TlvDq8ikWAM"  # Rachel — fallback if no clone
-
-# Voice settings tuned for documentary narration
-VOICE_SETTINGS = {
-    "stability":         0.55,   # 0-1. Higher = more consistent, less expressive
-    "similarity_boost":  0.80,   # How closely to match the voice clone
-    "style":             0.35,   # Expressiveness. 0.35 = authoritative but not robotic
-    "use_speaker_boost": True,   # Enhances voice clarity
-}
 
 # Pause durations
 PAUSE_DURATIONS = {
@@ -92,56 +73,60 @@ def split_on_pauses(text):
     return segments
 
 
-def tts_chunk(text, voice_id, api_key, model=DEFAULT_MODEL):
+def tts_chunk(text, voice_id):
     """
-    Convert a single text chunk to audio bytes.
+    Convert a single text chunk to audio bytes using edge-tts.
     Returns audio bytes or None on failure.
     """
-    r = requests.post(
-        f"{ELEVENLABS_API}/text-to-speech/{voice_id}",
-        headers={
-            "xi-api-key":   api_key,
-            "Content-Type": "application/json",
-        },
-        json={
-            "text":           text,
-            "model_id":       model,
-            "voice_settings": VOICE_SETTINGS,
-        },
-        timeout=60,
-    )
-    r.raise_for_status()
-    return r.content
+    import subprocess
+    import tempfile
+    
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        temp_file = f.name
+        
+    cmd = ["edge-tts", "--text", text, "--voice", voice_id, "--write-media", temp_file]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        with open(temp_file, "rb") as f:
+            audio_bytes = f.read()
+        os.unlink(temp_file)
+        return audio_bytes
+    except subprocess.CalledProcessError as e:
+        if os.path.exists(temp_file):
+            os.unlink(temp_file)
+        raise Exception(f"Edge TTS error: {e.stderr.decode()}")
 
 
 def generate_silence(duration_secs, sample_rate=44100):
     """
-    Generate silent WAV audio bytes.
+    Generate silent MP3 audio bytes using FFmpeg.
     Used for [PAUSE] markers between TTS chunks.
     """
-    import struct
-    import math
+    import subprocess
+    import tempfile
+    
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        temp_file = f.name
+        
+    cmd = [
+        "ffmpeg", "-y", "-f", "lavfi", "-i", f"anullsrc=r={sample_rate}:cl=mono", 
+        "-t", str(duration_secs), "-q:a", "2", "-acodec", "libmp3lame", temp_file
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        with open(temp_file, "rb") as f:
+            silence_bytes = f.read()
+        os.unlink(temp_file)
+        return silence_bytes
+    except Exception:
+        if os.path.exists(temp_file):
+            os.unlink(temp_file)
+        return b''
 
-    num_samples  = int(sample_rate * duration_secs)
-    num_channels = 1
-    bits_per_sample = 16
-    byte_rate    = sample_rate * num_channels * bits_per_sample // 8
-    block_align  = num_channels * bits_per_sample // 8
-    data_size    = num_samples * block_align
 
-    header = struct.pack('<4sI4s4sIHHIIHH4sI',
-        b'RIFF', 36 + data_size, b'WAVE',
-        b'fmt ', 16, 1, num_channels,
-        sample_rate, byte_rate, block_align,
-        bits_per_sample, b'data', data_size
-    )
-    silence = b'\x00' * data_size
-    return header + silence
-
-
-def narrate_section(section, voice_id, api_key, output_dir, log_fn=print):
+def narrate_section(section, voice_id, output_dir, log_fn=print):
     """
-    Convert one script section to audio.
+    Convert one script section to audio using Edge TTS.
     Returns (audio_file_path, duration_secs) or (None, 0) on failure.
     """
     narration = section.get("narration", "")
@@ -164,7 +149,7 @@ def narrate_section(section, voice_id, api_key, output_dir, log_fn=print):
             if not content.strip():
                 continue
             try:
-                audio = tts_chunk(content, voice_id, api_key)
+                audio = tts_chunk(content, voice_id)
                 audio_parts.append(audio)
                 time.sleep(0.3)   # rate limit safety
             except Exception as e:
@@ -192,7 +177,7 @@ def narrate_section(section, voice_id, api_key, output_dir, log_fn=print):
     return str(out_path), round(total_secs, 1)
 
 
-def narrate_full_script(script, voice_id, api_key, output_dir, log_fn=print):
+def narrate_full_script(script, voice_id, output_dir, log_fn=print):
     """
     Narrate the complete script section by section.
 
@@ -205,12 +190,8 @@ def narrate_full_script(script, voice_id, api_key, output_dir, log_fn=print):
       "master_audio": "/path/to/master.mp3"  (all sections concatenated)
     }
     """
-    if not api_key:
-        log_fn("  ⚠ No ELEVENLABS_API_KEY — skipping narration")
-        return None
-
     if not voice_id:
-        log_fn(f"  ⚠ No ELEVENLABS_VOICE_ID — using default voice ({DEFAULT_VOICE})")
+        log_fn(f"  ⚠ No EDGE_TTS_VOICE — using default voice ({DEFAULT_VOICE})")
         voice_id = DEFAULT_VOICE
 
     sections      = script.get("sections", [])
@@ -227,7 +208,7 @@ def narrate_full_script(script, voice_id, api_key, output_dir, log_fn=print):
         log_fn(f"  🎙  [{i+1}/{len(sections)}] {name}...", )
 
         audio_file, duration = narrate_section(
-            section, voice_id, api_key, str(audio_dir), log_fn
+            section, voice_id, str(audio_dir), log_fn
         )
 
         if audio_file:
@@ -250,7 +231,7 @@ def narrate_full_script(script, voice_id, api_key, output_dir, log_fn=print):
     if cta_text:
         log_fn("  🎙  CTA...")
         cta_section = {"name": "CTA", "narration": cta_text, "timestamp": "end"}
-        cta_file, cta_dur = narrate_section(cta_section, voice_id, api_key, str(audio_dir), log_fn)
+        cta_file, cta_dur = narrate_section(cta_section, voice_id, str(audio_dir), log_fn)
         if cta_file:
             results.append({
                 "name": "CTA", "timestamp": "end",
@@ -287,29 +268,32 @@ def _concat_audio(file_paths, output_path, log_fn=print):
 
     if not file_paths:
         return None
+        
+    work_dir = os.path.dirname(file_paths[0])
 
     # Create FFmpeg concat list
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', dir=work_dir, encoding='utf-8', delete=False) as f:
         for fp in file_paths:
-            f.write(f"file '{fp}'\n")
+            rel_name = os.path.basename(fp)
+            f.write(f"file '{rel_name}'\n")
         list_file = f.name
 
     cmd = [
         "ffmpeg", "-y",
         "-f", "concat",
         "-safe", "0",
-        "-i", list_file,
+        "-i", os.path.basename(list_file),
         "-acodec", "libmp3lame",
         "-q:a", "2",
-        output_path
+        os.path.abspath(output_path)
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        result = subprocess.run(cmd, cwd=work_dir, capture_output=True, timeout=120)
         os.unlink(list_file)
         if result.returncode == 0:
             return output_path
-        log_fn(f"  ⚠ Audio concat failed: {result.stderr[-200:]}")
+        log_fn(f"  ⚠ Audio concat failed: {result.stderr.decode('utf-8', errors='ignore')}")
         return None
     except Exception as e:
         log_fn(f"  ⚠ Audio concat error: {e}")
@@ -317,22 +301,12 @@ def _concat_audio(file_paths, output_path, log_fn=print):
 
 
 def clone_voice_instructions():
-    """Print setup instructions for voice cloning."""
+    """Print setup instructions for using Edge TTS."""
     print("""
-  🎙  VOICE CLONE SETUP (one-time, 5 minutes)
+  🎙  VOICE SETUP
   ─────────────────────────────────────────────
-  1. Go to elevenlabs.io → Sign up (free tier works to start)
-  2. Click Voices → Add Voice → Instant Voice Clone
-  3. Name it (e.g. "My Voice")
-  4. Upload audio: record yourself reading anything for 3+ minutes
-     - Clear audio, no background noise
-     - Normal speaking pace
-     - Your natural narration voice
-     - WAV or MP3, any quality
-  5. Click Add Voice → copy the Voice ID
-  6. Add to .env:
-     ELEVENLABS_API_KEY=your_api_key
-     ELEVENLABS_VOICE_ID=your_voice_id
-  7. Done. Every video sounds like you.
+  1. Edge TTS is completely free and requires no setup!
+  2. You can preview voices natively.
+  3. Default voice is set to: en-US-ChristopherNeural
   ─────────────────────────────────────────────
 """)

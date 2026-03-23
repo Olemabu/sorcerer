@@ -208,3 +208,126 @@ def prepare_all_clips(source_path, script, video_duration_mins, output_dir, anth
             log_fn(f"  ⚠️  {ratio} clip failed: {msg}")
 
     return results
+
+
+def select_clip_segment_from_metadata(video_info, anthropic_key):
+    """
+    Ask Claude to pick the best clip window from video metadata alone
+    (no script needed). Used for clipping external YouTube videos.
+
+    Args:
+        video_info : dict with title, description, duration, channel
+        anthropic_key : Anthropic API key
+
+    Returns:
+        (start_secs, end_secs, reason)
+    """
+    duration = video_info.get("duration", 0)
+    if not anthropic_key or duration < 30:
+        start = min(30, max(0, duration - TARGET_CLIP_SECS - 10))
+        return (start, min(start + TARGET_CLIP_SECS, duration), "Fallback — no API key or video too short")
+
+    prompt = f"""A YouTube video needs to be clipped into a 75-second viral short.
+
+VIDEO METADATA:
+Title: {video_info.get('title', '')}
+Channel: {video_info.get('channel', '')}
+Duration: {duration} seconds ({duration // 60}m {duration % 60}s)
+Views: {video_info.get('view_count', 0):,}
+Description (first 500 chars):
+{video_info.get('description', '')[:500]}
+
+Based on the title and description, estimate where the most compelling 75-second segment is likely located.
+
+Consider:
+1. Most videos front-load their hook in the first 30-90 seconds
+2. The "big reveal" or main point usually comes at 30-50% through
+3. The segment must be understandable without context
+4. It should create maximum curiosity to watch the full video
+
+Return ONLY valid JSON:
+{{
+  "start_seconds": <integer>,
+  "end_seconds": <integer>,
+  "reason": "one sentence on why this segment"
+}}"""
+
+    try:
+        r = requests.post(
+            ANTHROPIC_URL,
+            headers={
+                "x-api-key":         anthropic_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={
+                "model":      CLAUDE_MODEL,
+                "max_tokens": 200,
+                "messages":   [{"role": "user", "content": prompt}],
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        raw  = r.json()["content"][0]["text"].strip()
+        raw  = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+        data = json.loads(raw)
+        start = int(data["start_seconds"])
+        end   = int(data["end_seconds"])
+        # Sanity checks
+        start = max(0, min(start, duration - 30))
+        end   = min(end, duration)
+        if end - start < 15:
+            end = min(start + TARGET_CLIP_SECS, duration)
+        return (start, end, data.get("reason", "AI-selected"))
+    except Exception:
+        start = min(30, max(0, duration - TARGET_CLIP_SECS - 10))
+        return (start, min(start + TARGET_CLIP_SECS, duration), "Fallback — AI selection failed")
+
+
+def clip_external_video(video_path, video_info, anthropic_key, output_dir, log_fn=print):
+    """
+    Master function for clipping an external YouTube video.
+    No script needed — uses video metadata for segment selection.
+
+    Args:
+        video_path    : path to downloaded mp4
+        video_info    : dict from downloader.get_video_info()
+        anthropic_key : Anthropic API key
+        output_dir    : directory to save clips
+        log_fn        : logging function
+
+    Returns:
+        dict with clip paths, timestamps, and reason
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    log_fn("  ✂️  AI selecting best clip segment...")
+    start, end, reason = select_clip_segment_from_metadata(video_info, anthropic_key)
+    log_fn(f"  ✂️  Clip window: {start}s – {end}s ({end - start}s)")
+    log_fn(f"  ✂️  Reason: {reason}")
+
+    results = {
+        "start_secs":     start,
+        "end_secs":       end,
+        "clip_vertical":  None,
+        "clip_landscape": None,
+        "reason":         reason,
+        "title":          video_info.get("title", ""),
+    }
+
+    if not check_ffmpeg():
+        log_fn("  ⚠️  ffmpeg not installed — skipping clip renders")
+        return results
+
+    for ratio in ["vertical", "landscape"]:
+        out_path = output_dir / f"clip_{ratio}.mp4"
+        log_fn(f"  🎬  Rendering {ratio} clip ({CLIP_SPECS[ratio]['ratio']})...")
+        ok, msg = extract_clip(video_path, start, end, out_path, ratio)
+        if ok:
+            results[f"clip_{ratio}"] = str(out_path)
+            log_fn(f"  ✅  {ratio} clip → {out_path}")
+        else:
+            log_fn(f"  ⚠️  {ratio} clip failed: {msg}")
+
+    return results

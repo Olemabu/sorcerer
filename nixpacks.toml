@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["ffmpeg", "python311Full", "libsndfile", "stdenv.cc.cc.lib"]
+nixPkgs = ["ffmpeg", "python311Full", "libsndfile", "stdenv.cc.cc.lib", "yt-dlp"]
 
 [phases.install]
 cmds = ["python3.11 -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt"]

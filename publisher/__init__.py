@@ -32,6 +32,7 @@ def publish_all(
     captions,
     youtube_url,
     config,
+    youtube_preset="main",
     log_fn=print,
 ):
     """
@@ -44,6 +45,7 @@ def publish_all(
         captions          : dict from captions.generate_captions()
         youtube_url       : YouTube video URL (from youtube.upload)
         config            : dict of platform toggles + credentials
+        youtube_preset    : name of the YouTube preset to upload to (e.g. 'gaming')
         log_fn            : logging function
 
     config keys:
@@ -63,14 +65,25 @@ def publish_all(
     clip_l  = clips.get("clip_landscape")
 
     # ── YouTube ────────────────────────────────────────────────────
-    if config.get("youtube_enabled") and master_video_path:
-        log_fn("\n  ▶  YOUTUBE")
+    
+    # Check if a custom preset token exists, otherwise fall back to the default or config
+    preset_token = f"yt_token_{youtube_preset}.json"
+    if os.path.exists(preset_token):
+        token_to_use = preset_token
+    else:
+        token_to_use = config.get("youtube_token_file", "yt_token.json")
+        
+    # We enable YouTube publishing if ANY token file is present
+    youtube_enabled = config.get("youtube_enabled") or os.path.exists(token_to_use)
+
+    if youtube_enabled and master_video_path:
+        log_fn(f"\n  ▶  YOUTUBE (Channel Preset: {youtube_preset})")
         from publisher.youtube import upload as yt_upload
         ok, result = yt_upload(
             video_path  = master_video_path,
             captions    = captions,
             script      = None,
-            token_file  = config.get("youtube_token_file", "yt_token.json"),
+            token_file  = token_to_use,
             log_fn      = log_fn,
         )
         results["youtube"] = {"ok": ok, "result": result}

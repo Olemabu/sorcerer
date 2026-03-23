@@ -22,6 +22,10 @@ Board styles:
 AI Director decides which board based on dominant mood.
 Dark topics → chalkboard. Bright topics → whiteboard.
 Transitions between boards happen at major mood shifts.
+
+🚀 3D UPGRADE: The board now uses a 1000px perspective.
+All elements support translateZ and rotateY/rotateX for depth.
+Includes a 3D parallax grid background.
 """
 
 import json
@@ -118,6 +122,13 @@ BOARD_ACTIONS = {
     "board_erase":     "Section gets erased — clearing the slate",
     "board_zoom":      "Zoom into specific area",
     "board_pan":       "Pan across board to new section",
+
+    # 3D Specific
+    "3d_spin":         "Element spins 360 degrees on Y axis",
+    "3d_flip":         "Element flips 180 degrees over",
+    "3d_pop":          "Element pops out from the board in Z-space",
+    "3d_sink":         "Element sinks into the board",
+    "3d_tilt":         "Entire board tilts to show perspective",
 
     # Cinematic
     "letterbox_on":    "Cinematic black bars appear",
@@ -325,7 +336,8 @@ def _fallback_board_actions(script):
 
 
 def generate_remotion_project(script, direction, board_actions,
-                               audio_path, output_dir, log_fn=print):
+                              audio_path, output_dir, log_fn=print,
+                              width=1920, height=1080):
     """
     Generate a complete Remotion project that renders the video.
 
@@ -431,8 +443,8 @@ export const WATERMARK = {{
 
 export const VIDEO = {{
   fps: {fps},
-  width: 1920,
-  height: 1080,
+  width: {width},
+  height: {height},
   durationInFrames: {total_frames},
 }};
 """
@@ -455,7 +467,7 @@ export const Watermark: React.FC = () => {{
       <Img
         src={{staticFile('watermark.png')}}
         style={{
-          width: `${{Math.round(1920 * WATERMARK.scale)}}px`,
+          width: `${{Math.round(VIDEO.width * WATERMARK.scale)}}px`,
           filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.5))',
         }}
       />
@@ -474,14 +486,14 @@ export const Watermark: React.FC = () => {{
     (src_dir / "Board.tsx").write_text(board_tsx)
 
     # ── Root.tsx ──────────────────────────────────────────────────────────────
-    root_tsx = generate_root_component(title, total_frames, fps, audio_path)
+    root_tsx = generate_root_component(title, total_frames, fps, audio_path, width, height)
     (src_dir / "Root.tsx").write_text(root_tsx)
 
     log_fn(f"  🎬 Remotion project generated: {remotion_dir}")
     return str(remotion_dir)
 
 
-def generate_root_component(title, total_frames, fps, audio_path):
+def generate_root_component(title, total_frames, fps, audio_path, width, height):
     """Generate the main Remotion composition."""
     has_audio = audio_path and Path(audio_path).exists()
 
@@ -496,8 +508,8 @@ export const RemotionRoot: React.FC = () => {{
         component={{VideoSorcerer}}
         durationInFrames={{{total_frames}}}
         fps={{{fps}}}
-        width={{1920}}
-        height={{1080}}
+        width={{{width}}}
+        height={{{height}}}
         defaultProps={{{{}}}}
       />
     </>
@@ -584,6 +596,38 @@ export const VideoSorcerer: React.FC = () => {{
         pointerEvents: 'none',
         zIndex: 2,
       }}}}/>
+      
+      {{/* 3D Parallax Grid */}}
+      <div style={{{{
+        position: 'absolute',
+        inset: '-20%',
+        perspective: '1000px',
+        transform: `perspective(1000px) rotateX(10deg) translateY(${{Math.sin(frame / 60) * 20}}px)`,
+        pointerEvents: 'none',
+        zIndex: 0,
+      }}}}>
+        <div style={{{{
+          width: '140%',
+          height: '140%',
+          backgroundImage: board === CHALKBOARD 
+            ? 'radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px)'
+            : 'radial-gradient(circle, rgba(0,0,0,0.03) 1px, transparent 1px)',
+          backgroundSize: '80px 80px',
+          transform: `translateZ(-500px) rotateX(20deg)`,
+          opacity: 0.5,
+        }}}} />
+        <div style={{{{
+          width: '140%',
+          height: '140%',
+          position: 'absolute',
+          top: 0,
+          backgroundImage: board === CHALKBOARD 
+            ? 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)'
+            : 'linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px)',
+          backgroundSize: '160px 160px',
+          transform: `translateZ(-200px) rotateX(15deg)`,
+        }}}} />
+      </div>
 
       {{/* Letterbox bars */}}
       <div style={{{{
@@ -639,6 +683,8 @@ def generate_elements_component(timeline, board_actions):
                 "colour":       action.get("colour", "#1a1a1a"),
                 "size":         action.get("size", "medium"),
                 "direction":    action.get("direction", "from_left"),
+                "z_depth":      action.get("z_depth", 0),
+                "rotation_y":   action.get("rotation_y", 0),
             })
 
     elements_json = json.dumps(elements_data[:20])  # Keep manageable
@@ -690,7 +736,7 @@ function TextElement({{element, frame, board}}: any) {{
       position:  'absolute',
       top:       '50%',
       left:      '10%',
-      transform: `translate(${{translateX}}px, calc(-50% + ${{translateY}}px)) scale(${{scale}})`,
+      transform: `perspective(1000px) translate3d(${{translateX}}px, calc(-50% + ${{translateY}}px), ${{element.z_depth}}px) rotateY(${{element.rotation_y}}deg) scale(${{scale}})`,
       opacity,
       color:     element.colour,
       fontSize:  sizeConfig.fontSize,
@@ -700,6 +746,7 @@ function TextElement({{element, frame, board}}: any) {{
       zIndex:    10,
       maxWidth:  '80%',
       lineHeight: 1.2,
+      transformStyle: 'preserve-3d',
     }}}}>
       {{element.text}}
     </div>
