@@ -36,7 +36,6 @@ from engine import (
 )
 from intelligence import analyse
 from alerts import deliver, format_terminal, format_telegram
-from scriptwriter import generate_script, format_script_terminal, save_script_file
 
 load_dotenv()
 
@@ -125,10 +124,6 @@ def run_scan(db, quiet=False):
         print("No channels added. Use: sorcerer add <channel>")
         return 0
 
-    # Initialise usage tracker for this scan
-    from usage_tracker import UsageTracker
-    tracker = UsageTracker(str(DB_FILE))
-    tracker.reset_session()
 
     if not quiet:
         if SCAN_ONLY:
@@ -246,49 +241,15 @@ def run_scan(db, quiet=False):
                     found += 1
                     continue
 
-                # ── Full AI pipeline (credits available) ──
+                # ── Full AI pipeline ──
                 comments = fetch_comments(video["id"], YT_KEY)
                 intel    = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
 
-                # Generate full production package first
-                script = None
-                if ANTHROPIC_KEY and intel and not intel.get("_error"):
-                    log("  ✍  Generating full production package...")
-                    script   = generate_script(video, signal, baseline, comments, intel, ANTHROPIC_KEY)
-                    script_f = save_script_file(script, video, str(DATA_DIR))
-                    if script_f:
-                        log(f"  📄  Script saved → {script_f}")
-                        log_plain(format_script_terminal(script))
-                    else:
-                        log("  ⚠  Script generation failed")
-
-                # Run AI Director on the script
-                direction = None
-                if script and not script.get("_error") and ANTHROPIC_KEY:
-                    log("  🎬  AI Director is reviewing the script...")
-                    from director import direct, format_direction_terminal, format_direction_telegram
-                    direction = direct(
-                        script        = script,
-                        style         = "hybrid",
-                        target_culture = "global",
-                        anthropic_key  = ANTHROPIC_KEY,
-                        log_fn         = log,
-                    )
-                    if direction and not direction.get("_error"):
-                        log_plain(format_direction_terminal(direction))
-                        # Send director vision to Telegram
-                        from alerts import send_telegram
-                        dir_msg = format_direction_telegram(direction)
-                        if dir_msg:
-                            send_telegram(dir_msg, TG_TOKEN, TG_CHAT)
-                            log("  → Director vision sent to Telegram ✓")
-
-                # Deliver signal + production package to Telegram
+                # Deliver signal to Telegram
                 deliver(
                     video, signal, baseline, intel,
                     TG_TOKEN, TG_CHAT,
                     log_fn=log_plain,
-                    script=script,
                 )
 
                 db["seen_alerts"][key] = datetime.now().isoformat()
@@ -336,16 +297,6 @@ def run_scan(db, quiet=False):
             log("SCAN DONE — all quiet")
 
 
-    # Send usage summary to Telegram after every scan
-    try:
-        from usage_tracker import UsageTracker
-        tracker = UsageTracker(str(DB_FILE))
-        usage_summary = tracker.session_summary()
-        if usage_summary and TG_TOKEN and TG_CHAT:
-            from alerts import send_telegram
-            send_telegram(usage_summary, TG_TOKEN, TG_CHAT)
-    except Exception:
-        pass
 
     return len(new_alerts)
 
@@ -461,100 +412,9 @@ def cmd_status(args):
                 print(f"    {l.strip()}")
     print()
 
-
-def cmd_script(args):
-    """
-    Generate a shoot-ready script for any YouTube video on demand.
-    Usage: python sorcerer.py script <youtube_url_or_video_id>
-    """
-    if not YT_KEY:
-        print("❌  No YOUTUBE_API_KEY in .env")
-        return
-    if not ANTHROPIC_KEY:
-        print("❌  No ANTHROPIC_API_KEY — script generation requires Claude")
-        return
-
-    query = " ".join(args.video)
-
-    # Extract video ID from URL or use directly
-    vid_id = query
-    for pattern in ["watch?v=", "youtu.be/", "shorts/"]:
-        if pattern in query:
-            vid_id = query.split(pattern)[-1].split("&")[0].split("?")[0]
-            break
-
-    print(f"\n  🔍  Fetching video data for: {vid_id}")
-
-    try:
-        import requests as req
-        data = req.get(
-            "https://www.googleapis.com/youtube/v3/videos",
-            params={
-                "key":  YT_KEY,
-                "part": "statistics,snippet,contentDetails",
-                "id":   vid_id,
-            },
-            timeout=15,
-        ).json()
-
-        if not data.get("items"):
-            print("❌  Video not found — check the URL or ID")
-            return
-
-        item   = data["items"][0]
-        from datetime import timezone
-        pub_dt = datetime.fromisoformat(item["snippet"]["publishedAt"].replace("Z", "+00:00"))
-        age_h  = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
-        views  = int(item["statistics"].get("viewCount", 0))
-
-        from engine import parse_iso_duration, fetch_comments, build_baseline
-        video = {
-            "id":            vid_id,
-            "title":         item["snippet"]["title"],
-            "channel_title": item["snippet"]["channelTitle"],
-            "channel_id":    item["snippet"]["channelId"],
-            "age_hours":     round(age_h, 1),
-            "views":         views,
-            "likes":         int(item["statistics"].get("likeCount", 0)),
-            "comment_count": int(item["statistics"].get("commentCount", 0)),
-            "views_per_hour": round(views / max(age_h, 0.5), 1),
-            "duration_mins": parse_iso_duration(item["contentDetails"].get("duration", "PT0S")),
-        }
-
-        print(f"  📺  {video['title']} — {video['channel_title']}")
-        print(f"  👁   {video['views']:,} views · {video['age_hours']:.0f}h old")
-        print(f"  ✍   Pulling comments + generating script...\n")
-
-        comments = fetch_comments(vid_id, YT_KEY)
-
-        # Build a mock signal and baseline for on-demand use
-        signal   = {"level": "ON-DEMAND", "emoji": "📄", "multiplier": 0, "window": "manual"}
-        baseline = {"median_vph": video["views_per_hour"], "median_duration": video["duration_mins"],
-                    "mean_vph": video["views_per_hour"], "stdev_vph": 0, "sample_size": 1}
-
-        # Run intel first
-        from intelligence import analyse
-        intel = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
-
-        # Then generate full script
-        script   = generate_script(video, signal, baseline, comments, intel or {}, ANTHROPIC_KEY)
-        script_f = save_script_file(script, video, str(DATA_DIR))
-
-        log_plain(format_script_terminal(script))
-
-        if script_f:
-            print(f"\n  ✅  Script saved → {script_f}\n")
-        else:
-            print("  ⚠  Could not save script file")
-
-    except Exception as e:
-        print(f"  ❌  Error: {e}")
-
-
 def cmd_daemon(args):
     """
     Runs forever. Scans every SCAN_INTERVAL_HOURS hours.
-    Telegram bot runs in background for remote control.
     """
     interval_secs = SCAN_INTERVAL_HOURS * 3600
 
@@ -566,60 +426,8 @@ def cmd_daemon(args):
   ║  Channels      : {len(load_db().get('channels', {})):<24}║
   ║  Intelligence  : {_intel_str:<24}║
   ║  Telegram      : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
-  ║  Bot control   : {'ON ✓' if TG_TOKEN else 'OFF':<24}║
-  ╚══════════════════════════════════════════╝
+    ╚══════════════════════════════════════════╝
     """)
-
-    # ── Start Telegram bot in background ──────────────────────────────────────
-    bot = None
-    if TG_TOKEN and TG_CHAT:
-        from bot import SorcererBot
-
-        bot = SorcererBot(
-            token    = TG_TOKEN,
-            chat_id  = TG_CHAT,
-            db_file  = str(DB_FILE),
-            log_fn   = log,
-        )
-
-        # Give bot access to scan function
-        def bot_scan():
-            db = load_db()
-            return run_scan(db)
-
-        # Give bot access to add channel function
-        def bot_add(query):
-            if not YT_KEY:
-                return "❌ No YouTube API key configured."
-            from engine import resolve_channel
-            cid, title, subs = resolve_channel(query, YT_KEY)
-            if not cid:
-                return f"❌ Could not find channel: {query}"
-            db = load_db()
-            if cid in db.get("channels", {}):
-                return f"✅ Already watching: <b>{title}</b>"
-            db.setdefault("channels", {})[cid] = {
-                "id": cid, "title": title, "subscribers": subs,
-                "added": datetime.now().isoformat(),
-                "baseline": None, "last_checked": None, "alert_count": 0,
-            }
-            save_db(db)
-            return f"✅ Added <b>{title}</b> ({subs:,} subs) to radar.\nFirst scan within 2 hours."
-
-        bot.scan_fn = bot_scan
-        bot.add_fn  = bot_add
-
-        # Send startup message
-        bot.send(
-            "🧙 <b>SORCERER is online</b>\n\n"
-            f"Watching {len(load_db().get('channels', {}))} channel(s)\n"
-            f"Scanning every {SCAN_INTERVAL_HOURS} hours\n\n"
-            "Send /help to see all commands.\n"
-            "Send /add @channel to start watching someone."
-        )
-
-        bot.start_in_background()
-        log("  📱 Telegram bot started — send /help to your bot")
 
     # ── Main scan loop ─────────────────────────────────────────────────────────
     while True:
@@ -743,8 +551,6 @@ def main():
     p_rm = sub.add_parser("remove", help="Remove a channel from your radar")
     p_rm.add_argument("channel", nargs="+")
 
-    p_script = sub.add_parser("script", help="Generate a shoot-ready script for any video on demand")
-    p_script.add_argument("video", nargs="+", help="YouTube URL or video ID")
 
     sub.add_parser("list",   help="List all monitored channels")
     sub.add_parser("scan",   help="Run a scan right now")
@@ -759,7 +565,6 @@ def main():
         "remove": cmd_remove,
         "list":   cmd_list,
         "scan":   cmd_scan,
-        "script": cmd_script,
         "status": cmd_status,
         "daemon": cmd_daemon,
         "test":   cmd_test,
