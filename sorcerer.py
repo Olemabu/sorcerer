@@ -606,6 +606,30 @@ def cmd_daemon(args):
     ╚══════════════════════════════════════════╝
     """)
 
+    # ── Auto-seed preset channels if DB is empty ──────────────────────────────
+    db = load_db()
+    if not db.get("channels") and YT_KEY:
+        from presets import get_niche
+        niche = get_niche("full")
+        if niche:
+            log("No channels found — auto-loading FULL preset (15 channels)...")
+            added = 0
+            for ch_handle in niche["channels"]:
+                try:
+                    cid, title, subs = resolve_channel(ch_handle, YT_KEY)
+                    if cid and cid not in db["channels"]:
+                        db["channels"][cid] = {
+                            "id": cid, "title": title, "subscribers": subs,
+                            "added": datetime.now().isoformat(), "baseline": None,
+                            "last_checked": None, "alert_count": 0,
+                        }
+                        log(f"  + {title}")
+                        added += 1
+                except Exception as e:
+                    log(f"  ⚠ Skipped {ch_handle}: {e}")
+            save_db(db)
+            log(f"Auto-seed complete: {added} channels added to radar.")
+
     # ── Main scan loop ─────────────────────────────────────────────────────────
     # Start Telegram Bot if keys are present
     if TG_TOKEN and TG_CHAT:
