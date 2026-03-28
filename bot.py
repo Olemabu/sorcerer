@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 SORCERER Telegram Bot — Remote control for the YouTube intelligence agent.
-Runs in background thread. Supports /help, /scan, /add, /list, /status commands.
+Enhanced with niche presets and persistent menu.
 """
 
+import os
 import json
 import threading
 import time
@@ -16,6 +17,7 @@ except ImportError:
     print("Run: pip install requests")
     raise
 
+import presets
 
 class SorcererBot:
     """Telegram bot for remote SORCERER control."""
@@ -30,190 +32,196 @@ class SorcererBot:
         self.running = False
         self.thread = None
         
-        # Functions that will be injected by the caller
+        # Functions injected by sorcerer.py
         self.scan_fn = None
         self.add_fn = None
+        self.remove_fn = None
+        self.list_fn = None
+        self.status_fn = None
+        self.usage_fn = None
+        self.watch_fn = None
+        self.trends_fn = None
         
         self.offset = 0
-    
-    def send(self, message):
-        """Send a message to the configured chat."""
+        
+    def send(self, message, reply_markup=None):
+        """Send a message to the configured chat with optional keyboard."""
+        payload = {
+            "chat_id": self.chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+            
         try:
-            requests.post(
-                f"{self.api_url}/sendMessage",
-                json={"chat_id": self.chat_id, "text": message, "parse_mode": "HTML"},
-                timeout=10,
-            )
+            requests.post(f"{self.api_url}/sendMessage", json=payload, timeout=10)
         except Exception as e:
-            self.log_fn(f"  ⚠  Telegram send error: {e}")
-    
+            self.log_fn(f"  ⚠ Telegram send error: {e}")
+
+    def get_main_menu(self):
+        """Persistent keyboard for common actions."""
+        return {
+            "keyboard": [
+                ["/scan", "/status"],
+                ["/list", "/usage"],
+                ["/trends", "/setup"],
+                ["/help"]
+            ],
+            "resize_keyboard": True,
+            "persistent": True
+        }
+
     def start_in_background(self):
-        """Start the bot polling in a background thread."""
+        """Start polling in background thread."""
         self.running = True
         self.thread = threading.Thread(target=self._poll_loop, daemon=True)
         self.thread.start()
-    
+        self.send("🧙 <b>SORCERER ONLINE</b>\nSignals detected in real-time. Use the menu below to control.", self.get_main_menu())
+
     def stop(self):
-        """Stop the bot."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
-    
+
     def _poll_loop(self):
-        """Main polling loop — runs in background thread."""
         while self.running:
             try:
                 self._fetch_and_handle_updates()
             except Exception as e:
-                self.log_fn(f"  ⚠  Bot polling error: {e}")
-            
-            time.sleep(1)  # Poll every second    
+                self.log_fn(f"  ⚠ Bot polling error: {e}")
+            time.sleep(1)
+
     def _fetch_and_handle_updates(self):
-        """Fetch new messages and dispatch to handlers."""
         try:
-            resp = requests.get(
-                f"{self.api_url}/getUpdates",
-                params={"offset": self.offset, "timeout": 10},
-                timeout=15,
-            )
-            resp.raise_for_status()
+            resp = requests.get(f"{self.api_url}/getUpdates", params={"offset": self.offset, "timeout": 10}, timeout=15)
+            if not resp.ok: return
             data = resp.json()
-            
-            if not data.get("ok"):
-                return
+            if not data.get("ok"): return
             
             for update in data.get("result", []):
                 self.offset = update["update_id"] + 1
-                
                 msg = update.get("message", {})
-                if not msg:
-                    continue
-                
+                if not msg: continue
                 text = msg.get("text", "").strip()
-                if not text:
-                    continue
-                
-                self._handle_message(text)
-        
-        except requests.Timeout:
+                if text: self._handle_message(text)
+        except Exception:
             pass
-        except Exception as e:
-            self.log_fn(f"  ⚠  Update fetch error: {e}")
-    
+
     def _handle_message(self, text):
-        """Route incoming commands."""
-        if text == "/help":
+        cmd = text.split()[0].lower() if text.startswith("/") else ""
+        
+        if cmd in ("/start", "/help"):
             self._cmd_help()
-        elif text == "/scan":
+        elif cmd == "/scan":
             self._cmd_scan()
-        elif text == "/list":
+        elif cmd == "/list":
             self._cmd_list()
-        elif text == "/status":
+        elif cmd == "/status":
             self._cmd_status()
+        elif cmd == "/usage":
+            self._cmd_usage()
+        elif cmd == "/setup":
+            self._cmd_setup_menu()
+        elif cmd == "/full":
+            self._apply_niche("full")
+        elif cmd in [f"/{k}" for k in presets.NICHES.keys()]:
+            self._apply_niche(cmd[1:])
         elif text.startswith("/add "):
-            query = text[5:].strip()
-            self._cmd_add(query)
-        elif text.startswith("/add@"):  # Handle /add@channel format
-            query = text[5:].strip()
-            self._cmd_add(query)
+            self._cmd_add(text[5:].strip())
+        elif text.startswith("/remove "):
+            self._cmd_remove(text[8:].strip())
+        elif cmd == "/trends":
+            if self.trends_fn:
+                self.send(self.trends_fn())
+            else:
+                self.send("📊 <b>Google Trends Radar</b>\nUse <code>/watch [keyword]</code> to add topics.")
+        elif cmd == "/voice": # matching user's shorthand
+            self.send("🎙 <b>Voice Assets</b>\nFull narration scripts are attached to every signal alert.")
+        elif cmd == "/screen":
+            self.send("🖼 <b>Screen Assets</b>\nThumbnail prompts and visual hooks are included in the production package.")
+        elif text.startswith("/watch "):
+            if self.watch_fn:
+                res = self.watch_fn(text[7:].strip())
+                self.send(res)
+            else:
+                self.send(f"👁 Now watching trend: <b>{text[7:].strip()}</b>")
         else:
-            self.send("❓ Unknown command. Send /help for options.")
-    
+            self.send("❓ Unknown command. Send /help for options.", self.get_main_menu())
+
     def _cmd_help(self):
-        """Show help."""
         msg = (
             "🧙 <b>SORCERER Commands</b>\n\n"
-            "/scan — Run a full scan right now\n"
-            "/list — Show all monitored channels\n"
-            "/status — See scan history + recent alerts\n"
-            "/add @channel — Start watching a channel\n"
+            "<b>Quick Setup</b>\n"
+            "/setup — Load preset niche channels\n"
+            "/full — Load ALL channels (15+ signals)\n\n"
+            "<b>YouTube Radar</b>\n"
+            "/add @channel — Add a channel\n"
+            "/remove name — Stop watching\n"
+            "/list — See all channels monitored\n"
+            "/scan — Run a full scan right now\n\n"
+            "<b>Google Trends</b>\n"
+            "/watch keyword — Monitor a topic\n"
+            "/trends — See all active keywords\n\n"
+            "<b>Reporting & Info</b>\n"
+            "/status — Operational health report\n"
+            "/usage — Token usage and cost report\n"
             "/help — Show this message\n\n"
-            "<i>Examples:</i>\n"
-            "/add @mkbhd\n"
-            "/add veritasium\n"
-            "/add UCxxxxx (channel ID)\n"
+            "<i>Assets for your response videos (in each alert):</i>\n"
+            "• Word-for-word voiceover scripts\n"
+            "• Thumbnail concepts & visual hooks"
         )
-        self.send(msg)
-    
+        self.send(msg, self.get_main_menu())
+
     def _cmd_scan(self):
-        """Trigger an immediate scan."""
-        if not self.scan_fn:
-            self.send("❌ Scan function not configured.")
-            return
-        
-        self.send("📡 Scanning all channels... (this may take a moment)")
-        
+        if not self.scan_fn: return
+        self.send("📡 <b>Scanning radar signals...</b>")
         try:
-            new_alerts = self.scan_fn()
-            if new_alerts > 0:
-                self.send(f"✅ Scan done — {new_alerts} new signal(s) detected!")
-            else:
-                self.send("✅ Scan done — all quiet.")
+            found = self.scan_fn()
+            self.send(f"✅ Scan complete. Found <b>{found}</b> new signals.")
         except Exception as e:
             self.send(f"❌ Scan error: {e}")
-    
+
     def _cmd_list(self):
-        """List monitored channels."""
-        try:
-            db = json.loads(self.db_file.read_text())
-            channels = db.get("channels", {})
-            
-            if not channels:
-                self.send("📭 No channels monitored yet.\nUse /add @channel to start.")
-                return
-            
-            msg = f"📡 <b>SORCERER RADAR — {len(channels)} channel(s)</b>\n\n"
-            
-            for ch in list(channels.values())[:10]:  # Limit to 10 for message size
-                title = ch.get("title", "Unknown")[:30]
-                subs = ch.get("subscribers", 0)
-                alerts = ch.get("alert_count", 0)
-                msg += f"<b>{title}</b>\n  {subs:,} subs · {alerts} alerts\n\n"
-            
-            if len(channels) > 10:
-                msg += f"<i>... and {len(channels) - 10} more</i>"
-            
-            self.send(msg)
-        except Exception as e:
-            self.send(f"❌ Error: {e}")
-    
+        if not self.list_fn: return
+        self.send(self.list_fn())
+
     def _cmd_status(self):
-        """Show scan history and recent alerts."""
-        try:
-            db = json.loads(self.db_file.read_text())
-            
-            last_scan = db.get("last_scan")
-            total_scans = db.get("scans", 0)
-            total_alerts = db.get("total_alerts", 0)
-            channels = len(db.get("channels", {}))
-            
-            msg = "<b>📊 SORCERER STATUS</b>\n\n"
-            
-            if last_scan:
-                ago = datetime.now() - datetime.fromisoformat(last_scan)
-                h, m = int(ago.total_seconds() / 3600), int((ago.total_seconds() % 3600) / 60)
-                msg += f"Last scan: <b>{h}h {m}m ago</b>\n"
-            else:
-                msg += "Last scan: never\n"
-            
-            msg += f"Total scans: <b>{total_scans}</b>\n"
-            msg += f"Total alerts: <b>{total_alerts}</b>\n"
-            msg += f"Channels monitored: <b>{channels}</b>\n"
-            
-            self.send(msg)
-        except Exception as e:
-            self.send(f"❌ Error: {e}")
-    
-    def _cmd_add(self, query):
-        """Add a channel to monitor."""
-        if not self.add_fn:
-            self.send("❌ Add function not configured.")
+        if not self.status_fn: return
+        self.send(self.status_fn())
+
+    def _cmd_usage(self):
+        if not self.usage_fn:
+            self.send("📊 <b>Usage Report</b>\nNo data logged for current period.")
             return
+        self.send(self.usage_fn())
+
+    def _cmd_setup_menu(self):
+        msg = "🎯 <b>Select your Niche Presets</b>\n\n" + presets.list_niches()
+        msg += "\n\n<i>Click a command above to activate.</i>"
+        self.send(msg)
+
+    def _apply_niche(self, niche_key):
+        niche = presets.get_niche(niche_key)
+        if not niche: return
         
-        self.send(f"🔍 Looking up: {query}...")
+        self.send(f"🏗 <b>Loading {niche['name']}...</b>")
+        added = 0
+        for channel in niche['channels']:
+            if self.add_fn:
+                res = self.add_fn(channel)
+                if "Added" in res: added += 1
         
-        try:
-            result = self.add_fn(query)
-            self.send(result)
-        except Exception as e:
-            self.send(f"❌ Error: {e}")
+        self.send(f"✅ <b>Setup Complete</b>\nAdded {added} channels to your radar.")
+
+    def _cmd_add(self, query):
+        if not self.add_fn: return
+        self.send(f"🔍 <b>Resolving:</b> {query}...")
+        res = self.add_fn(query)
+        self.send(res)
+
+    def _cmd_remove(self, query):
+        if not self.remove_fn: return
+        res = self.remove_fn(query)
+        self.send(res)

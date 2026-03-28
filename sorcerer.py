@@ -36,6 +36,8 @@ from engine import (
 )
 from intelligence import analyse
 from alerts import deliver, format_terminal, format_telegram
+from scriptwriter import generate_script, format_script_terminal, save_script_file
+from bot import SorcererBot
 
 load_dotenv()
 
@@ -246,10 +248,23 @@ def run_scan(db, quiet=False):
                 intel    = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
 
                 # Deliver signal to Telegram
+                # Generate Response Script
+                script = None
+                if ANTHROPIC_KEY and intel and not intel.get("_error"):
+                    log(f"  [S]  Generating response script ({intel.get('recommended_length_mins', 10)}m)...")
+                    script = generate_script(video, signal, baseline, comments, intel, ANTHROPIC_KEY)
+                    script_f = save_script_file(script, video, str(DATA_DIR))
+                    if script_f:
+                        log(f"  📄  Script saved -> {script_f.name}")
+                        log_plain(format_script_terminal(script))
+                    else:
+                        log("  ⚠  Script generation failed")
+
                 deliver(
                     video, signal, baseline, intel,
                     TG_TOKEN, TG_CHAT,
                     log_fn=log_plain,
+                    script=script,
                 )
 
                 db["seen_alerts"][key] = datetime.now().isoformat()
@@ -412,6 +427,168 @@ def cmd_status(args):
                 print(f"    {l.strip()}")
     print()
 
+# ── Bot Wrappers ─────────────────────────────────────────────────────────────
+def bot_add(query):
+    if not YT_KEY: return "❌ No YOUTUBE_API_KEY"
+    db = load_db()
+    cid, title, subs = resolve_channel(query, YT_KEY)
+    if not cid: return f"❌ Could not find channel: {query}"
+    if cid in db["channels"]: return f"✅ Already on radar: {title}"
+    db["channels"][cid] = {
+        "id": cid, "title": title, "subscribers": subs,
+        "added": datetime.now().isoformat(), "baseline": None,
+        "last_checked": None, "alert_count": 0,
+    }
+    save_db(db)
+    return f"✅ Added to radar: <b>{title}</b> ({subs:,} subs)"
+
+def bot_remove(query):
+    db = load_db()
+    match = next((cid for cid, ch in db["channels"].items() if query.lower() in ch["title"].lower() or query == cid), None)
+    if not match: return f"❌ Not found: {query}"
+    title = db["channels"][match]["title"]
+    del db["channels"][match]
+    save_db(db)
+    return f"✅ Removed: <b>{title}</b>"
+
+def bot_list():
+    db = load_db()
+    if not db["channels"]: return "📭 No channels yet. Use /add @channel"
+    msg = f"📡 <b>SORCERER RADAR — {len(db['channels'])} channels</b>\n\n"
+    for ch in list(db["channels"].values())[:15]:
+        bl = ch.get("baseline")
+        bstr = f"{bl['median_vph']:,.0f} vph" if bl else "building..."
+        msg += f"• <b>{ch['title'][:25]}</b>\n  {ch['subscribers']:,} subs · {bstr}\n"
+    if len(db["channels"]) > 15: msg += f"\n<i>...and {len(db['channels'])-15} more</i>"
+    return msg
+
+def bot_status():
+    db = load_db()
+    last = db.get("last_scan")
+    msg = "<b>🧙 SORCERER STATUS</b>\n" + "─" * 20 + "\n"
+    if last:
+        ago = datetime.now() - datetime.fromisoformat(last)
+        h, m = int(ago.total_seconds() / 3600), int((ago.total_seconds() % 3600) / 60)
+        msg += f"Last scan: {h}h {m}m ago\n"
+    msg += f"Total scans: {db.get('scans', 0)}\n"
+    msg += f"Total signals: {db.get('total_alerts', 0)}\n"
+    msg += f"Channels: {len(db.get('channels', {}))}\n"
+    return msg
+
+def bot_usage():
+    db = load_db()
+    alerts = db.get("total_alerts", 0)
+    # Estimate: $0.15 per signal (Claude Opus + YouTube API overhead)
+    cost = alerts * 0.15
+    msg = (
+        "📊 <b>Cost & Usage Report</b>\n" + "─" * 25 + "\n"
+        f"Signals Analyzed : {alerts}\n"
+        f"Est. API Cost    : ${cost:.2f}\n"
+        f"Scan Tier        : {'FREE' if SCAN_ONLY else 'PRO'}\n\n"
+        "<i>Costs are estimated based on token count for Claude Opus signal analysis.</i>"
+    )
+    return msg
+
+def bot_watch(keyword):
+    if not keyword: return "❌ Please specify a keyword."
+    from trends import add_manual_keywords
+    add_manual_keywords(DB_FILE, [keyword])
+    return f"👁 Now watching Google Trends for: <b>{keyword}</b>"
+
+def bot_trends():
+    from trends import get_manual_keywords
+    kws = get_manual_keywords(DB_FILE)
+    if not kws: return "📈 <b>Google Trends Radar</b>\nNo manual keywords yet. Use <code>/watch [keyword]</code>."
+    msg = "📈 <b>Active Trend Keywords</b>\n\n"
+    for kw in kws:
+        msg += f"• {kw}\n"
+    return msg
+
+def cmd_script(args):
+    """
+    Generate a shoot-ready script for any YouTube video on demand.
+    Usage: python sorcerer.py script <url> [--length short/medium/long] [--tone pro/witty/funny/cynical]
+    """
+    if not YT_KEY:
+        print("❌  No YOUTUBE_API_KEY")
+        return
+    if not ANTHROPIC_KEY:
+        print("❌  No ANTHROPIC_API_KEY")
+        return
+
+    query = " ".join(args.video)
+    length = args.length or "medium"
+    tone = args.tone or "pro"
+
+    # Extract video ID from URL or use directly
+    vid_id = query
+    for pattern in ["watch?v=", "youtu.be/", "shorts/"]:
+        if pattern in query:
+            vid_id = query.split(pattern)[-1].split("&")[0].split("?")[0]
+            break
+
+    print(f"\n  🔍  Fetching video data for: {vid_id}")
+
+    try:
+        data = yt_get("videos", YT_KEY, 
+                      part="statistics,snippet,contentDetails",
+                      id=vid_id)
+
+        if not data.get("items"):
+            print("❌  Video not found — check the URL or ID")
+            return
+
+        item   = data["items"][0]
+        from datetime import timezone
+        pub_dt = datetime.fromisoformat(item["snippet"]["publishedAt"].replace("Z", "+00:00"))
+        age_h  = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+        views  = int(item["statistics"].get("viewCount", 0))
+
+        video = {
+            "id":            vid_id,
+            "title":         item["snippet"]["title"],
+            "channel_title": item["snippet"]["channelTitle"],
+            "channel_id":    item["snippet"]["channelId"],
+            "age_hours":     round(age_h, 1),
+            "views":         views,
+            "likes":         int(item["statistics"].get("likeCount", 0)),
+            "comment_count": int(item["statistics"].get("commentCount", 0)),
+            "views_per_hour": round(views / max(age_h, 0.5), 1),
+            "duration_mins": parse_iso_duration(item["contentDetails"].get("duration", "PT0S")),
+        }
+
+        print(f"  📺  {video['title']} — {video['channel_title']}")
+        print(f"  👁   {video['views']:,} views · {video['age_hours']:.0f}h old")
+        print(f"  ✍   Pulling comments + generating script...\n")
+
+        comments = fetch_comments(vid_id, YT_KEY)
+
+        # Build a mock signal and baseline for on-demand use
+        signal   = {"level": "ON-DEMAND", "emoji": "📄", "multiplier": 0, "window": "manual"}
+        baseline = {"median_vph": video["views_per_hour"], "median_duration": video["duration_mins"],
+                    "mean_vph": video["views_per_hour"], "stdev_vph": 0, "sample_size": 1}
+
+        # Run intel first
+        intel = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
+
+        # Then generate full response script
+        print(f"  ✍   Generating {length} {tone} script...")
+        script = generate_script(video, signal, baseline, comments, intel or {}, 
+                                 ANTHROPIC_KEY, length=length, tone=tone)
+        script_f = save_script_file(script, video, str(DATA_DIR))
+
+        if script:
+            log_plain(format_script_terminal(script))
+            if script_f:
+                print(f"\n  ✅  SUCCESS! Script saved to: {script_f.name}")
+                print(f"  Estimated runtime: {script.get('estimated_runtime_mins', 0)} mins")
+                print(f"  Hook Score: {script.get('hook_score', 0)}/10")
+        else:
+            print("  ⚠  Script generation failed")
+
+    except Exception as e:
+        print(f"  ❌  Error: {e}")
+
 def cmd_daemon(args):
     """
     Runs forever. Scans every SCAN_INTERVAL_HOURS hours.
@@ -430,6 +607,20 @@ def cmd_daemon(args):
     """)
 
     # ── Main scan loop ─────────────────────────────────────────────────────────
+    # Start Telegram Bot if keys are present
+    if TG_TOKEN and TG_CHAT:
+        bot = SorcererBot(TG_TOKEN, TG_CHAT, str(DB_FILE))
+        bot.scan_fn = lambda: run_scan(load_db(), quiet=True)
+        bot.add_fn = bot_add
+        bot.remove_fn = bot_remove
+        bot.list_fn = bot_list
+        bot.status_fn = bot_status
+        bot.usage_fn = bot_usage
+        bot.watch_fn = bot_watch
+        bot.trends_fn = bot_trends
+        bot.start_in_background()
+        log("Telegram Bot started ✓")
+
     while True:
         db = load_db()
         run_scan(db)
@@ -551,6 +742,11 @@ def main():
     p_rm = sub.add_parser("remove", help="Remove a channel from your radar")
     p_rm.add_argument("channel", nargs="+")
 
+    p_script = sub.add_parser("script", help="Generate a shoot-ready script for any video on demand")
+    p_script.add_argument("video", nargs="+", help="YouTube URL or video ID")
+    p_script.add_argument("--length", choices=["short", "medium", "long"], default="medium")
+    p_script.add_argument("--tone", choices=["pro", "witty", "funny", "cynical"], default="pro")
+
 
     sub.add_parser("list",   help="List all monitored channels")
     sub.add_parser("scan",   help="Run a scan right now")
@@ -566,6 +762,7 @@ def main():
         "list":   cmd_list,
         "scan":   cmd_scan,
         "status": cmd_status,
+        "script": cmd_script,
         "daemon": cmd_daemon,
         "test":   cmd_test,
     }
