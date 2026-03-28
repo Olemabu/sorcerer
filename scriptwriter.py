@@ -69,9 +69,12 @@ def generate_script(video, signal, baseline, comments, intel, anthropic_key,
 
     # Length mapping
     length_map = {
-        "short":  "approx 3-5 mins (short, punchy response)",
-        "medium": "approx 10-12 mins (standard documentary depth)",
-        "long":   "approx 20-30 mins (deep dive investigation)",
+        "short":     "approx 59 seconds (YouTube Short / Vertical)",
+        "medium":    "approx 6-10 mins (Standard Documentary)",
+        "long":      "approx 15-20 mins (Deep Dive)",
+        "resp_short": "EXACTLY 2 mins 50 seconds (Short-form response)",
+        "resp_med":   "EXACTLY 6 minutes (Medium response)",
+        "resp_long":  "EXACTLY 15 minutes (Full documentary response)",
     }
     length_desc = length_map.get(length, length_map["medium"])
 

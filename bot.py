@@ -41,7 +41,9 @@ class SorcererBot:
         self.usage_fn = None
         self.watch_fn = None
         self.trends_fn = None
+        self.script_fn = None  # New: Injected script generator
         
+        self.focus_video = None # Stores the last detected/added video ID/data
         self.offset = 0
         
     def send(self, message, reply_markup=None):
@@ -59,6 +61,11 @@ class SorcererBot:
             requests.post(f"{self.api_url}/sendMessage", json=payload, timeout=10)
         except Exception as e:
             self.log_fn(f"  ⚠ Telegram send error: {e}")
+
+    def set_focus(self, video_data):
+        """Update the currently focused video (for /voice and /screen commands)."""
+        self.focus_video = video_data
+        self.log_fn(f"  🎯 Bot focus set to: {video_data['title']}")
 
     def get_main_menu(self):
         """Persistent keyboard for common actions."""
@@ -142,10 +149,16 @@ class SorcererBot:
                 self.send(self.trends_fn())
             else:
                 self.send("📊 <b>Google Trends Radar</b>\nUse <code>/watch [keyword]</code> to add topics.")
-        elif cmd == "/voice": # matching user's shorthand
-            self.send("🎙 <b>Voice Assets</b>\nFull narration scripts are attached to every signal alert.")
+        elif cmd == "/voice":
+            self._cmd_voice_menu()
         elif cmd == "/screen":
-            self.send("🖼 <b>Screen Assets</b>\nThumbnail prompts and visual hooks are included in the production package.")
+            self._cmd_screen()
+        elif cmd == "/resp_short":
+            self._generate_resp("resp_short")
+        elif cmd == "/resp_med":
+            self._generate_resp("resp_med")
+        elif cmd == "/resp_long":
+            self._generate_resp("resp_long")
         elif text.startswith("/watch "):
             if self.watch_fn:
                 res = self.watch_fn(text[7:].strip())
@@ -232,3 +245,60 @@ class SorcererBot:
         if not self.remove_fn: return
         res = self.remove_fn(query)
         self.send(res)
+
+    def _cmd_voice_menu(self):
+        if not self.focus_video:
+            self.send("❌ <b>No target video.</b>\nInteract with a signal alert first or add a channel.")
+            return
+        
+        msg = (
+            f"🎙 <b>Response Script Generator</b>\n"
+            f"Target: <i>{self.focus_video['title']}</i>\n\n"
+            f"Choose your response duration:"
+        )
+        markup = {
+            "keyboard": [
+                ["/resp_short (2m 50s)", "/resp_med (6m)"],
+                ["/resp_long (15m)", "/help"]
+            ],
+            "resize_keyboard": True,
+            "one_time_keyboard": True
+        }
+        self.send(msg, markup)
+
+    def _cmd_screen(self):
+        if not self.focus_video:
+            self.send("❌ <b>No target video.</b>")
+            return
+        
+        # Get high-res thumbnail
+        vid_id = self.focus_video.get("id")
+        thumb_url = f"https://img.youtube.com/vi/{vid_id}/maxresdefault.jpg"
+        
+        msg = (
+            f"🖼 <b>Screen Asset</b>\n"
+            f"Video: {self.focus_video['title']}\n\n"
+            f"<a href='{thumb_url}'>High-Res Thumbnail (Max)</a>\n"
+            f"<i>Use this for your B-roll or response layouts.</i>"
+        )
+        self.send(msg)
+
+    def _generate_resp(self, length):
+        if not self.script_fn or not self.focus_video:
+            self.send("❌ Cannot generate script right now.")
+            return
+        
+        self.send(f"✍ <b>Generating {length.replace('resp_', '')} response script...</b>\nThis may take 30-60 seconds.")
+        
+        def run():
+            try:
+                res = self.script_fn(self.focus_video, length)
+                # Script function should return the formatted script string
+                if res:
+                    self.send(res, self.get_main_menu())
+                else:
+                    self.send("❌ Script generation failed.")
+            except Exception as e:
+                self.send(f"❌ Error: {e}")
+        
+        threading.Thread(target=run, daemon=True).start()

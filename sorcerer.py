@@ -59,6 +59,8 @@ BASE_DIR = Path(__file__).parent
 # Locally: falls back to the project directory.
 DATA_DIR = Path(os.getenv("SORCERER_DATA_DIR", BASE_DIR))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+BOT_INSTANCE = None # Global for daemon mode access
 DB_FILE  = DATA_DIR / "sorcerer_db.json"
 LOG_FILE = DATA_DIR / "sorcerer_log.txt"
 
@@ -267,6 +269,10 @@ def run_scan(db, quiet=False):
                     script=script,
                 )
 
+                # Set bot focus on the latest detected video for /voice and /screen
+                if BOT_INSTANCE:
+                    BOT_INSTANCE.set_focus(video)
+
                 db["seen_alerts"][key] = datetime.now().isoformat()
                 db["total_alerts"] = db.get("total_alerts", 0) + 1
                 db["channels"][cid]["alert_count"] = ch.get("alert_count", 0) + 1
@@ -347,6 +353,10 @@ def cmd_add(args):
     save_db(db)
     print(f"✅  Added to radar: {title}  ({subs:,} subs)")
     print(f"    Run 'python sorcerer.py scan' to start")
+    
+    # Update bot focus on manually added channel
+    if BOT_INSTANCE:
+        BOT_INSTANCE.set_focus({"id": cid, "title": title, "channel_title": title})
 
 
 def cmd_remove(args):
@@ -504,6 +514,27 @@ def bot_trends():
         msg += f"• {kw}\n"
     return msg
 
+def bot_script(video, length="resp_short"):
+    """Bot-friendly script generator wrapper."""
+    if not ANTHROPIC_KEY: return "❌ No ANTHROPIC_API_KEY"
+    
+    # Needs to fetch comments + run intel first for a high quality response
+    log(f"Bot triggering {length} script for: {video['title']}")
+    comments = fetch_comments(video["id"], YT_KEY)
+    
+    # Mock signal/baseline for the generator
+    signal = {"level": "BOT-REQUEST", "emoji": "🎙", "multiplier": 0, "window": "manual"}
+    baseline = {"median_vph": 0, "median_duration": 0} 
+    
+    intel = analyse(video, signal, baseline, comments, ANTHROPIC_KEY)
+    script = generate_script(video, signal, baseline, comments, intel or {}, 
+                              ANTHROPIC_KEY, length=length, tone="pro")
+    
+    if not script: return "❌ Script generation failed."
+    
+    from scriptwriter import format_script_telegram
+    return format_script_telegram(script, video)
+
 def cmd_script(args):
     """
     Generate a shoot-ready script for any YouTube video on demand.
@@ -633,16 +664,18 @@ def cmd_daemon(args):
     # ── Main scan loop ─────────────────────────────────────────────────────────
     # Start Telegram Bot if keys are present
     if TG_TOKEN and TG_CHAT:
-        bot = SorcererBot(TG_TOKEN, TG_CHAT, str(DB_FILE))
-        bot.scan_fn = lambda: run_scan(load_db(), quiet=True)
-        bot.add_fn = bot_add
-        bot.remove_fn = bot_remove
-        bot.list_fn = bot_list
-        bot.status_fn = bot_status
-        bot.usage_fn = bot_usage
-        bot.watch_fn = bot_watch
-        bot.trends_fn = bot_trends
-        bot.start_in_background()
+        global BOT_INSTANCE
+        BOT_INSTANCE = SorcererBot(TG_TOKEN, TG_CHAT, str(DB_FILE))
+        BOT_INSTANCE.scan_fn = lambda: run_scan(load_db(), quiet=True)
+        BOT_INSTANCE.add_fn = bot_add
+        BOT_INSTANCE.remove_fn = bot_remove
+        BOT_INSTANCE.list_fn = bot_list
+        BOT_INSTANCE.status_fn = bot_status
+        BOT_INSTANCE.usage_fn = bot_usage
+        BOT_INSTANCE.watch_fn = bot_watch
+        BOT_INSTANCE.trends_fn = bot_trends
+        BOT_INSTANCE.script_fn = bot_script
+        BOT_INSTANCE.start_in_background()
         log("Telegram Bot started ✓")
 
     while True:
