@@ -105,9 +105,14 @@ class SorcererBot:
                 msg = update.get("message", {})
                 if not msg: continue
                 text = msg.get("text", "").strip()
-                if text: self._handle_message(text)
-        except Exception:
-            pass
+                if text:
+                    try:
+                        self._handle_message(text)
+                    except Exception as e:
+                        self.log_fn(f"  ⚠ Handler error for '{text}': {e}")
+                        self.send(f"❌ Error handling command: {e}")
+        except Exception as e:
+            self.log_fn(f"  ⚠ Poll error: {e}")
 
     def _handle_message(self, text):
         cmd = text.split()[0].lower() if text.startswith("/") else ""
@@ -176,12 +181,14 @@ class SorcererBot:
 
     def _cmd_scan(self):
         if not self.scan_fn: return
-        self.send("📡 <b>Scanning radar signals...</b>")
-        try:
-            found = self.scan_fn()
-            self.send(f"✅ Scan complete. Found <b>{found}</b> new signals.")
-        except Exception as e:
-            self.send(f"❌ Scan error: {e}")
+        self.send("📡 <b>Scanning radar signals...</b> (results will appear shortly)")
+        def do_scan():
+            try:
+                found = self.scan_fn()
+                self.send(f"✅ Scan complete. Found <b>{found}</b> new signals.")
+            except Exception as e:
+                self.send(f"❌ Scan error: {e}")
+        threading.Thread(target=do_scan, daemon=True).start()
 
     def _cmd_list(self):
         if not self.list_fn: return
