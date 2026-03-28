@@ -535,6 +535,18 @@ def bot_script(video, length="resp_short"):
     from scriptwriter import format_script_telegram
     return format_script_telegram(script, video)
 
+def bot_screen(video):
+    """Bot-friendly screen asset wrapper — returns formatted timestamp/crop guide."""
+    if not ANTHROPIC_KEY: return "❌ No ANTHROPIC_API_KEY configured."
+    if not YT_KEY: return "❌ No YOUTUBE_API_KEY configured."
+    
+    log(f"Bot generating screen assets for: {video['title']}")
+    comments = fetch_comments(video["id"], YT_KEY)
+    
+    from scriptwriter import get_screen_assets, format_screen_assets_telegram
+    shots = get_screen_assets(video, comments, ANTHROPIC_KEY)
+    return format_screen_assets_telegram(shots, video)
+
 def cmd_script(args):
     """
     Generate a shoot-ready script for any YouTube video on demand.
@@ -675,6 +687,7 @@ def cmd_daemon(args):
         BOT_INSTANCE.watch_fn = bot_watch
         BOT_INSTANCE.trends_fn = bot_trends
         BOT_INSTANCE.script_fn = bot_script
+        BOT_INSTANCE.screen_fn = bot_screen
         BOT_INSTANCE.start_in_background()
         log("Telegram Bot started ✓")
 

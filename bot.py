@@ -41,9 +41,10 @@ class SorcererBot:
         self.usage_fn = None
         self.watch_fn = None
         self.trends_fn = None
-        self.script_fn = None  # New: Injected script generator
+        self.script_fn = None  # Injected script generator
+        self.screen_fn = None  # Injected screen asset generator
         
-        self.focus_video = None # Stores the last detected/added video ID/data
+        self.focus_video = None  # Locks onto the latest detected/added video
         self.offset = 0
         
     def send(self, message, reply_markup=None):
@@ -268,20 +269,23 @@ class SorcererBot:
 
     def _cmd_screen(self):
         if not self.focus_video:
-            self.send("❌ <b>No target video.</b>")
+            self.send("❌ <b>No target video.</b>\nWait for a signal alert or run /scan first.")
             return
         
-        # Get high-res thumbnail
-        vid_id = self.focus_video.get("id")
-        thumb_url = f"https://img.youtube.com/vi/{vid_id}/maxresdefault.jpg"
+        if not self.screen_fn:
+            self.send("❌ Screen asset generator not configured.")
+            return
         
-        msg = (
-            f"🖼 <b>Screen Asset</b>\n"
-            f"Video: {self.focus_video['title']}\n\n"
-            f"<a href='{thumb_url}'>High-Res Thumbnail (Max)</a>\n"
-            f"<i>Use this for your B-roll or response layouts.</i>"
-        )
-        self.send(msg)
+        self.send("🔍 <b>Analyzing video for key visual moments...</b>\n<i>Identifying the best frames to screenshot and crop for your response. ~30 sec</i>")
+        
+        def run():
+            try:
+                result = self.screen_fn(self.focus_video)
+                self.send(result, self.get_main_menu())
+            except Exception as e:
+                self.send(f"❌ Error: {e}")
+        
+        threading.Thread(target=run, daemon=True).start()
 
     def _generate_resp(self, length):
         if not self.script_fn or not self.focus_video:

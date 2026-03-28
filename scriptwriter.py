@@ -728,4 +728,185 @@ def save_script(script, video, output_dir):
 
 # Keep old names for compatibility
 save_script_file = save_script
+
+
+def generate_screen_assets(video, comments, anthropic_key, num_shots=7):
+    """
+    Identify the most visually valuable moments in the source video.
+
+    Returns a list of {"timestamp_secs": int, "timestamp_str": "MM:SS",
+    "reason": str, "what_to_capture": str, "url": str}
+
+    These are screenshot targets — specific moments the user can open and
+    pause to grab for use in their own low-resource response video.
+    """
+    if not anthropic_key:
+        return None
+
+    vid_id = video.get("id", "")
+    duration_mins = video.get("duration_mins", 10)
+    duration_secs = int(duration_mins * 60)
+
+    comment_block = "\n".join(
+        f'[{c["likes"]} likes] "{c["text"][:200]}"'
+        for c in (comments or [])[:30]
+    ) or "No comments available."
+
+    prompt = f"""You are helping a low-resource solo creator build a response video to this high-performing video.
+They cannot afford original footage, animations, or stock video.
+Their strategy: screenshot specific moments from the source video to use as B-roll clips in their own video.
+
+VIDEO:
+Title: {video['title']}
+Channel: {video['channel_title']}
+Duration: {duration_mins:.0f} minutes ({duration_secs} seconds)
+Views: {video.get('views', 0):,}
+
+TOP COMMENTS (audience reactions):
+{comment_block}
+
+YOUR TASK:
+Identify exactly {num_shots} timestamps in the source video that would be most useful as visual assets.
+For each, identify a moment that shows:
+- A key data point, chart, or statistic being displayed
+- A dramatic or surprising visual moment audiences reacted to
+- A "before/after" or comparison frame
+- The host making a key claim or reveal
+- A moment that provokes the reaction "I need to respond to this"
+
+Return a JSON array ONLY, no prose:
+[
+  {{
+    "timestamp_secs": <integer seconds from video start>,
+    "timestamp_str": "<MM:SS format>",
+    "reason": "<1-sentence: why this is a useful asset>",
+    "what_to_capture": "<exactly what will be visible on screen at this moment>"
+  }}
+]
+
+Timestamps must be between 0 and {duration_secs}. Space them out across the video."""
+
+    try:
+        raw = claude_request(prompt, anthropic_key, model=CLAUDE_MODEL, max_tokens=1500)
+        if not raw or raw.get("_error"):
+            return None
+
+        # raw is already a dict from claude_request — but here we expect a list
+        # We need the raw string instead
+        return raw  # claude_request returns parsed JSON, which may already be a list
+    except Exception:
+        return None
+
+
+def _claude_screen_request(prompt, anthropic_key):
+    """Make a raw Claude request and return the parsed JSON list."""
+    import requests as _req
+    headers = {
+        "x-api-key": anthropic_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    body = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 1500,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    try:
+        r = _req.post("https://api.anthropic.com/v1/messages", headers=headers, json=body, timeout=60)
+        r.raise_for_status()
+        raw_text = r.json()["content"][0]["text"].strip()
+        raw_text = raw_text.lstrip("```json").lstrip("```").rstrip("```").strip()
+        # Find JSON array in the text
+        start = raw_text.find("[")
+        end = raw_text.rfind("]") + 1
+        if start >= 0 and end > start:
+            import json
+            return json.loads(raw_text[start:end])
+    except Exception:
+        pass
+    return None
+
+
+def get_screen_assets(video, comments, anthropic_key, num_shots=7):
+    """
+    Main entry point: get visually useful screenshot targets.
+    Returns a list of timestamped moments with YT deep-links.
+    """
+    vid_id = video.get("id", "")
+    duration_mins = video.get("duration_mins", 10)
+    duration_secs = int(duration_mins * 60)
+
+    comment_block = "\n".join(
+        f'[{c["likes"]} likes] "{c["text"][:200]}"'
+        for c in (comments or [])[:30]
+    ) or "No comments available."
+
+    prompt = f"""You are helping a low-resource solo creator build a response video to this viral video.
+They cannot record original footage. They will screenshot specific moments from the source video to use as visual evidence and B-roll in their own response.
+
+VIDEO:
+Title: {video['title']}
+Channel: {video['channel_title']}
+Duration: {duration_mins:.0f} minutes total ({duration_secs} seconds)
+Views: {video.get('views', 0):,}
+
+TOP COMMENTS (audience sentiment):
+{comment_block}
+
+TASK: Identify {num_shots} specific timestamps to screenshot. Prioritize:
+1. Moments where a key claim, stat, or data is shown on screen
+2. Visual reveals / "wait what?" moments the audience reacted to
+3. Charts, graphs, or comparisons being presented
+4. The host making their strongest argument
+5. Moments that directly provoke a response from a competitor
+
+Return ONLY a JSON array. No extra text. No markdown.
+[
+  {{
+    "timestamp_secs": <int>,
+    "timestamp_str": "<MM:SS>",
+    "reason": "<why this screenshot is useful>",
+    "what_to_capture": "<what is literally visible on screen>",
+    "crop_hint": "<which part of the frame to crop: e.g. 'top-left quadrant showing the stat', 'full frame', 'bottom third with the caption', 'right half showing the chart'>"
+  }}
+]
+
+All timestamps must be between 0 and {duration_secs} seconds. Spread them across the full video."""
+
+    shots = _claude_screen_request(prompt, anthropic_key)
+
+    if not shots or not isinstance(shots, list):
+        return None
+
+    # Attach YouTube deep-links
+    for shot in shots:
+        t = shot.get("timestamp_secs", 0)
+        shot["url"] = f"https://youtube.com/watch?v={vid_id}&t={t}s"
+
+    return shots
+
+
+def format_screen_assets_telegram(shots, video):
+    """Format the screenshot targets for Telegram."""
+    if not shots:
+        return "❌ Could not identify screenshot targets."
+
+    msg = (
+        f"🖼 <b>Screen Assets — {len(shots)} Key Moments</b>\n"
+        f"<i>Source: {video['title'][:50]}</i>\n\n"
+        f"<i>Open each link → pause → screenshot → crop as indicated</i>\n"
+        f"{'─' * 25}\n\n"
+    )
+
+    for i, shot in enumerate(shots, 1):
+        crop = shot.get('crop_hint', 'full frame')
+        msg += (
+            f"<b>{i}. {shot['timestamp_str']}</b> — {shot['reason']}\n"
+            f"📌 <i>{shot['what_to_capture']}</i>\n"
+            f"✂️ Crop: <code>{crop}</code>\n"
+            f"<a href='{shot['url']}'>→ Jump to {shot['timestamp_str']}</a>\n\n"
+        )
+
+    msg += "<i>Crop tightly around the key element. Use in your B-roll or as a reaction clip.</i>"
+    return msg
 format_script_terminal = format_script_terminal
