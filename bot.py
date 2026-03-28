@@ -138,9 +138,11 @@ class SorcererBot:
         elif cmd == "/setup":
             self._cmd_setup_menu()
         elif cmd == "/full":
-            self._apply_niche("full")
+            threading.Thread(target=self._apply_niche, args=("full",), daemon=True).start()
+        elif cmd == "/reseed":
+            threading.Thread(target=self._apply_niche, args=("full",), daemon=True).start()
         elif cmd in [f"/{k}" for k in presets.NICHES.keys()]:
-            self._apply_niche(cmd[1:])
+            threading.Thread(target=self._apply_niche, args=(cmd[1:],), daemon=True).start()
         elif text.startswith("/add "):
             self._cmd_add(text[5:].strip())
         elif text.startswith("/remove "):
@@ -227,14 +229,35 @@ class SorcererBot:
         niche = presets.get_niche(niche_key)
         if not niche: return
         
-        self.send(f"🏗 <b>Loading {niche['name']}...</b>")
+        total = len(niche['channels'])
+        self.send(f"🏗 <b>Loading {niche['name']}...</b>\n<i>Resolving {total} channels via YouTube API. This may take 2-5 minutes.</i>")
         added = 0
-        for channel in niche['channels']:
+        skipped = 0
+        failed = 0
+        for i, channel in enumerate(niche['channels'], 1):
             if self.add_fn:
-                res = self.add_fn(channel)
-                if "Added" in res: added += 1
+                try:
+                    res = self.add_fn(channel)
+                    if "Added" in res:
+                        added += 1
+                    elif "Already" in res:
+                        skipped += 1
+                    else:
+                        failed += 1
+                    # Send progress every 10 channels
+                    if i % 10 == 0:
+                        self.send(f"⏳ Progress: {i}/{total} channels processed...")
+                except Exception:
+                    failed += 1
         
-        self.send(f"✅ <b>Setup Complete</b>\nAdded {added} channels to your radar.")
+        self.send(
+            f"✅ <b>Setup Complete</b>\n"
+            f"Channels added : {added}\n"
+            f"Already on radar: {skipped}\n"
+            f"Failed to resolve: {failed}\n\n"
+            f"<i>Send /list to see your full radar.</i>",
+            self.get_main_menu()
+        )
 
     def _cmd_add(self, query):
         if not self.add_fn: return
