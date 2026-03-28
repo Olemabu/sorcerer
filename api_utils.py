@@ -106,7 +106,7 @@ def claude_request(
             raw = r.json()["content"][0]["text"].strip()
 
             # Clean markdown fences that Claude sometimes wraps JSON in
-            raw = raw.lstrip("```json").lstrip("```;").rstrip("```).strip()
+            raw = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
 
             return json.loads(raw)
 
