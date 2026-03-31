@@ -32,7 +32,7 @@ except ImportError:
 
 from engine import (
     resolve_channel, fetch_videos, fetch_comments,
-    build_baseline, classify,
+    build_baseline, classify, yt_get, parse_iso_duration,
 )
 from intelligence import analyse
 from alerts import deliver, format_terminal, format_telegram
@@ -60,7 +60,8 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = Path(os.getenv("SORCERER_DATA_DIR", BASE_DIR))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-BOT_INSTANCE = None # Global for daemon mode access
+BOT_INSTANCE   = None  # Global for daemon mode access
+RADAR_PAUSED   = False  # Toggle via /pause — zero cost when True
 DB_FILE  = DATA_DIR / "sorcerer_db.json"
 LOG_FILE = DATA_DIR / "sorcerer_log.txt"
 
@@ -107,13 +108,13 @@ def log(msg):
     ts   = datetime.now().strftime("%Y-%m-%d %H:%M")
     line = f"[{ts}] {msg}"
     print(line)
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 def log_plain(msg):
     """For pre-formatted blocks (no timestamp prefix)."""
     print(msg)
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(msg + "\n")
 
 
@@ -269,9 +270,13 @@ def run_scan(db, quiet=False):
                     script=script,
                 )
 
-                # Set bot focus on the latest detected video for /voice and /screen
+                # Set bot focus and register alert for reply-based /assets
                 if BOT_INSTANCE:
                     BOT_INSTANCE.set_focus(video)
+                    hint_msg_id = BOT_INSTANCE.send(
+                        "💡 Reply to this message with /assets to get scripts + screenshots"
+                    )
+                    BOT_INSTANCE.register_alert_video(hint_msg_id, video)
 
                 db["seen_alerts"][key] = datetime.now().isoformat()
                 db["total_alerts"] = db.get("total_alerts", 0) + 1
@@ -475,7 +480,9 @@ def bot_list():
 def bot_status():
     db = load_db()
     last = db.get("last_scan")
+    radar_state = "⏸ PAUSED" if RADAR_PAUSED else "🟢 ACTIVE"
     msg = "<b>🧙 SORCERER STATUS</b>\n" + "─" * 20 + "\n"
+    msg += f"Radar: <b>{radar_state}</b>\n"
     if last:
         ago = datetime.now() - datetime.fromisoformat(last)
         h, m = int(ago.total_seconds() / 3600), int((ago.total_seconds() % 3600) / 60)
@@ -498,6 +505,25 @@ def bot_usage():
         "<i>Costs are estimated based on token count for Claude Opus signal analysis.</i>"
     )
     return msg
+
+def bot_pause():
+    global RADAR_PAUSED
+    RADAR_PAUSED = True
+    log("Radar PAUSED via Telegram")
+    return (
+        "⏸ <b>Radar paused.</b>\n"
+        "No scans will run. Zero API cost.\n"
+        "Send /resume when you want it back on."
+    )
+
+def bot_resume():
+    global RADAR_PAUSED
+    RADAR_PAUSED = False
+    log("Radar RESUMED via Telegram")
+    return (
+        "▶️ <b>Radar resumed.</b>\n"
+        f"Next scan runs within {SCAN_INTERVAL_HOURS}h."
+    )
 
 def bot_watch(keyword):
     if not keyword: return "❌ Please specify a keyword."
@@ -530,8 +556,6 @@ def bot_script(video, length="resp_short"):
     script = generate_script(video, signal, baseline, comments, intel or {}, 
                               ANTHROPIC_KEY, length=length, tone="pro")
     
-    if not script: return "❌ Script generation failed."
-    
     from scriptwriter import format_script_telegram
     return format_script_telegram(script, video)
 
@@ -545,7 +569,51 @@ def bot_screen(video):
     
     from scriptwriter import get_screen_assets, format_screen_assets_telegram
     shots = get_screen_assets(video, comments, ANTHROPIC_KEY)
+    
+    if isinstance(shots, dict) and shots.get("_error"):
+        return f"❌ <b>Claude Error:</b> {shots['_error']}"
+        
     return format_screen_assets_telegram(shots, video)
+
+
+def bot_resolve_video(vid_id):
+    """
+    Fetch full video metadata from a bare video ID.
+    Called by the bot when the user pastes a YouTube URL directly.
+    Returns a video_data dict compatible with bot_script / bot_screen, or None.
+    """
+    if not YT_KEY:
+        return None
+    try:
+        data = yt_get("videos", YT_KEY,
+                      part="statistics,snippet,contentDetails",
+                      id=vid_id)
+        if not data.get("items"):
+            return None
+        item = data["items"][0]
+        from datetime import timezone
+        pub_dt = datetime.fromisoformat(
+            item["snippet"]["publishedAt"].replace("Z", "+00:00")
+        )
+        age_h = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+        views = int(item["statistics"].get("viewCount", 0))
+        return {
+            "id":            vid_id,
+            "title":         item["snippet"]["title"],
+            "channel_title": item["snippet"]["channelTitle"],
+            "channel_id":    item["snippet"]["channelId"],
+            "age_hours":     round(age_h, 1),
+            "views":         views,
+            "likes":         int(item["statistics"].get("likeCount", 0)),
+            "comment_count": int(item["statistics"].get("commentCount", 0)),
+            "views_per_hour": round(views / max(age_h, 0.5), 1),
+            "duration_mins": parse_iso_duration(
+                item["contentDetails"].get("duration", "PT0S")
+            ),
+        }
+    except Exception as e:
+        log(f"bot_resolve_video error for {vid_id}: {e}")
+        return None
 
 def cmd_script(args):
     """
@@ -688,10 +756,17 @@ def cmd_daemon(args):
         BOT_INSTANCE.trends_fn = bot_trends
         BOT_INSTANCE.script_fn = bot_script
         BOT_INSTANCE.screen_fn = bot_screen
+        BOT_INSTANCE.resolve_video_fn = bot_resolve_video
+        BOT_INSTANCE.pause_fn = bot_pause
+        BOT_INSTANCE.resume_fn = bot_resume
         BOT_INSTANCE.start_in_background()
         log("Telegram Bot started ✓")
 
     while True:
+        if RADAR_PAUSED:
+            # Radar paused — bot stays alive, no API calls
+            time.sleep(30)
+            continue
         db = load_db()
         run_scan(db)
         log(f"Next scan in {SCAN_INTERVAL_HOURS}h — sleeping...")
@@ -814,7 +889,7 @@ def main():
 
     p_script = sub.add_parser("script", help="Generate a shoot-ready script for any video on demand")
     p_script.add_argument("video", nargs="+", help="YouTube URL or video ID")
-    p_script.add_argument("--length", choices=["short", "medium", "long"], default="medium")
+    p_script.add_argument("--length", choices=["short", "medium", "long", "resp_short", "resp_med", "resp_long", "resp_hour"], default="medium")
     p_script.add_argument("--tone", choices=["pro", "witty", "funny", "cynical"], default="pro")
 
 

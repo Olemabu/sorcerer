@@ -24,7 +24,7 @@ from api_utils import claude_request
 #   "opus"   → best quality, ~$0.08/script  (default)
 #   "sonnet" → good quality, ~$0.01/script  (use when credits are low)
 _MODEL_MAP = {
-    "opus":   "claude-opus-4-5-20250514",
+    "opus":   "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",
 }
 _model_choice = os.getenv("SCRIPT_MODEL", "opus").lower().strip()
@@ -69,12 +69,13 @@ def generate_script(video, signal, baseline, comments, intel, anthropic_key,
 
     # Length mapping
     length_map = {
-        "short":     "approx 59 seconds (YouTube Short / Vertical)",
-        "medium":    "approx 6-10 mins (Standard Documentary)",
-        "long":      "approx 15-20 mins (Deep Dive)",
+        "short":      "approx 59 seconds (YouTube Short / Vertical)",
+        "medium":     "approx 6-10 mins (Standard Documentary)",
+        "long":       "approx 15-20 mins (Deep Dive)",
         "resp_short": "EXACTLY 2 mins 50 seconds (Short-form response)",
         "resp_med":   "EXACTLY 6 minutes (Medium response)",
         "resp_long":  "EXACTLY 15 minutes (Full documentary response)",
+        "resp_hour":  "EXACTLY 60 minutes (Deep-dive documentary — 10+ sections, ~9,000 words of narration)",
     }
     length_desc = length_map.get(length, length_map["medium"])
 
@@ -365,7 +366,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON.
         prompt     = prompt,
         api_key    = anthropic_key,
         max_tokens = 16000,
-        timeout    = 120,
+        timeout    = 300,
         retries    = 2,
         backoff    = 5.0,
     )
@@ -507,8 +508,11 @@ def format_script_terminal(script):
 
 def format_script_telegram(script, video):
     """Viral Response Package for Telegram."""
-    if not script or script.get("_error"):
+    if not script:
         return None
+    
+    if isinstance(script, dict) and script.get("_error"):
+        return f"❌ <b>Claude Error:</b> {script['_error']}"
 
     fhm  = script.get("fear_hope_money_map", [{}])
     cb   = script.get("comment_bait", [{}])
@@ -723,7 +727,7 @@ def save_script(script, video, output_dir):
             md += f"- {n}\n"
 
     filepath.write_text(md, encoding="utf-8")
-    return str(filepath)
+    return filepath
 
 
 # Keep old names for compatibility
@@ -799,32 +803,16 @@ Timestamps must be between 0 and {duration_secs}. Space them out across the vide
 
 
 def _claude_screen_request(prompt, anthropic_key):
-    """Make a raw Claude request and return the parsed JSON list."""
-    import requests as _req
-    headers = {
-        "x-api-key": anthropic_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    body = {
-        "model": CLAUDE_MODEL,
-        "max_tokens": 1500,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    try:
-        r = _req.post("https://api.anthropic.com/v1/messages", headers=headers, json=body, timeout=60)
-        r.raise_for_status()
-        raw_text = r.json()["content"][0]["text"].strip()
-        raw_text = raw_text.lstrip("```json").lstrip("```").rstrip("```").strip()
-        # Find JSON array in the text
-        start = raw_text.find("[")
-        end = raw_text.rfind("]") + 1
-        if start >= 0 and end > start:
-            import json
-            return json.loads(raw_text[start:end])
-    except Exception:
-        pass
-    return None
+    """Make a Claude request and return the parsed JSON list."""
+    from api_utils import claude_request
+    return claude_request(
+        model      = CLAUDE_MODEL,
+        prompt     = prompt,
+        api_key    = anthropic_key,
+        max_tokens = 1500,
+        timeout    = 60,
+        retries    = 2,
+    )
 
 
 def get_screen_assets(video, comments, anthropic_key, num_shots=7):
@@ -875,8 +863,8 @@ All timestamps must be between 0 and {duration_secs} seconds. Spread them across
 
     shots = _claude_screen_request(prompt, anthropic_key)
 
-    if not shots or not isinstance(shots, list):
-        return None
+    if not shots or (isinstance(shots, dict) and shots.get("_error")):
+        return shots  # return error dict or None
 
     # Attach YouTube deep-links
     for shot in shots:
