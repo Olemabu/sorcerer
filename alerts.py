@@ -156,7 +156,9 @@ def send_telegram(message, token, chat_id):
             },
             timeout=10,
         )
-        return r.ok
+        if r.ok:
+            return r.json().get("result", {}).get("message_id")
+        return False
     except Exception:
         return False
 
@@ -168,11 +170,12 @@ def deliver(video, signal, baseline, intel, telegram_token, telegram_chat_id, lo
 
     # Send signal alert first
     telegram_msg = format_telegram(video, signal, baseline, intel)
-    if send_telegram(telegram_msg, telegram_token, telegram_chat_id):
+    alert_msg_id = send_telegram(telegram_msg, telegram_token, telegram_chat_id)
+    if alert_msg_id:
         log_fn("  → Telegram signal alert sent ✓")
     else:
         log_fn("  → Telegram not configured (terminal only)")
-        return
+        return None
 
     # Send full production package if script is available
     if script and not script.get("_error"):
@@ -207,3 +210,5 @@ def deliver(video, signal, baseline, intel, telegram_token, telegram_chat_id, lo
                     pass
         except Exception as e:
             log_fn(f"  ⚠ Could not send production package: {e}")
+
+    return alert_msg_id

@@ -263,7 +263,7 @@ def run_scan(db, quiet=False):
                     else:
                         log("  ⚠  Script generation failed")
 
-                deliver(
+                alert_msg_id = deliver(
                     video, signal, baseline, intel,
                     TG_TOKEN, TG_CHAT,
                     log_fn=log_plain,
@@ -271,12 +271,14 @@ def run_scan(db, quiet=False):
                 )
 
                 # Set bot focus and register alert for reply-based /assets
-                if BOT_INSTANCE:
+                if BOT_INSTANCE and alert_msg_id:
                     BOT_INSTANCE.set_focus(video)
+                    BOT_INSTANCE.register_alert_video(alert_msg_id, video)
                     hint_msg_id = BOT_INSTANCE.send(
                         "💡 Reply to this message with /assets to get scripts + screenshots"
                     )
-                    BOT_INSTANCE.register_alert_video(hint_msg_id, video)
+                    if hint_msg_id:
+                        BOT_INSTANCE.register_alert_video(hint_msg_id, video)
 
                 db["seen_alerts"][key] = datetime.now().isoformat()
                 db["total_alerts"] = db.get("total_alerts", 0) + 1
