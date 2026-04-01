@@ -61,7 +61,6 @@ DATA_DIR = Path(os.getenv("SORCERER_DATA_DIR", BASE_DIR))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 BOT_INSTANCE   = None  # Global for daemon mode access
-RADAR_PAUSED   = False  # Toggle via /pause — zero cost when True
 DB_FILE  = DATA_DIR / "sorcerer_db.json"
 LOG_FILE = DATA_DIR / "sorcerer_log.txt"
 
@@ -482,7 +481,8 @@ def bot_list():
 def bot_status():
     db = load_db()
     last = db.get("last_scan")
-    radar_state = "⏸ PAUSED" if RADAR_PAUSED else "🟢 ACTIVE"
+    is_paused = db.get("paused", False)
+    radar_state = "⏸ PAUSED" if is_paused else "🟢 ACTIVE"
     msg = "<b>🧙 SORCERER STATUS</b>\n" + "─" * 20 + "\n"
     msg += f"Radar: <b>{radar_state}</b>\n"
     if last:
@@ -509,8 +509,9 @@ def bot_usage():
     return msg
 
 def bot_pause():
-    global RADAR_PAUSED
-    RADAR_PAUSED = True
+    db = load_db()
+    db["paused"] = True
+    save_db(db)
     log("Radar PAUSED via Telegram")
     return (
         "⏸ <b>Radar paused.</b>\n"
@@ -519,8 +520,9 @@ def bot_pause():
     )
 
 def bot_resume():
-    global RADAR_PAUSED
-    RADAR_PAUSED = False
+    db = load_db()
+    db["paused"] = False
+    save_db(db)
     log("Radar RESUMED via Telegram")
     return (
         "▶️ <b>Radar resumed.</b>\n"
@@ -765,11 +767,11 @@ def cmd_daemon(args):
         log("Telegram Bot started ✓")
 
     while True:
-        if RADAR_PAUSED:
+        db = load_db()
+        if db.get("paused", False):
             # Radar paused — bot stays alive, no API calls
             time.sleep(30)
             continue
-        db = load_db()
         run_scan(db)
         log(f"Next scan in {SCAN_INTERVAL_HOURS}h — sleeping...")
         time.sleep(interval_secs)
